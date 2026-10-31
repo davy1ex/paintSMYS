@@ -26,7 +26,7 @@ export default defineConfig({
       emptyOutDir: true,
       rollupOptions: {
         input: {
-          index: resolve(process.cwd(), 'index.html'),
+          desktop: resolve(process.cwd(), 'desktop.html'),
         },
       },
     },
