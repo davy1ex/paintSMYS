@@ -1,0 +1,50 @@
+{
+  "name": "paint-smys",
+  "version": "0.1.0",
+  "private": true,
+  "description": "A local-first object graphics editor with a Windows 95 look.",
+  "author": "paintSMYS",
+  "license": "UNLICENSED",
+  "main": "./dist/main/main.js",
+  "scripts": {
+    "dev": "npm run dev:desktop",
+    "dev:desktop": "electron-vite dev --config electron.vite.config.ts",
+    "dev:web": "vite --config vite.config.ts",
+    "typecheck": "tsc --noEmit",
+    "build": "npm run typecheck && npm run build:desktop && npm run build:web",
+    "build:desktop": "electron-vite build --config electron.vite.config.ts",
+    "build:web": "vite build --config vite.config.ts",
+    "start": "electron-vite preview --config electron.vite.config.ts",
+    "package": "npm run build:desktop && electron-builder",
+    "package:dir": "npm run build:desktop && electron-builder --dir",
+    "package:win": "npm run build:desktop && electron-builder --win",
+    "package:linux": "npm run build:desktop && electron-builder --linux",
+    "package:mac": "npm run build:desktop && electron-builder --mac"
+  },
+  "dependencies": {
+    "react": "^19.2.1",
+    "react-dom": "^19.2.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.19.1",
+    "@types/react": "^19.2.7",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^5.1.1",
+    "electron": "^39.2.6",
+    "electron-builder": "^26.0.12",
+    "electron-vite": "^5.0.0",
+    "typescript": "^5.9.3",
+    "vite": "^7.2.6"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "electron",
+      "esbuild"
+    ]
+  },
+  "allowScripts": {
+    "electron@39.8.10": true,
+    "esbuild@0.25.12": true,
+    "esbuild@0.28.2": true
+  }
+}
