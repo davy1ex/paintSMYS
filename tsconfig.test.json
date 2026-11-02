@@ -13,6 +13,7 @@
   "include": [
     "src/application/**/*.ts",
     "src/core/**/*.ts",
+    "src/app/desktop/window/close-handshake.ts",
     "src/app/desktop/project-storage.ts",
     "tests/**/*.ts"
   ]

@@ -2,8 +2,10 @@ import { app, BrowserWindow, dialog, ipcMain, type WebContents } from 'electron'
 import { realpath } from 'node:fs/promises'
 import { join } from 'node:path'
 import { inspectSaveAsTarget, readProjectFolder, saveExistingProjectFolder, saveProjectAsFolder } from './project-storage'
+import { CloseHandshake } from './window/close-handshake'
 
 const projectRoots = new WeakMap<WebContents, string>()
+const closeHandshakes = new WeakMap<BrowserWindow, CloseHandshake>()
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : 'The project operation failed.'
@@ -30,6 +32,35 @@ function createWindow(): void {
   const sendMaximizedState = () => {
     window.webContents.send('paintSMYS:maximized-changed', window.isMaximized())
   }
+
+  const closeHandshake = new CloseHandshake({
+    requestRendererDecision: (requestId) => window.webContents.send('paintSMYS:close-request', requestId),
+    closeWindow: () => window.close(),
+    onFailure: (requestId, message) => {
+      if (!window.isDestroyed() && !window.webContents.isDestroyed()) {
+        try {
+          window.webContents.send('paintSMYS:close-request-failed', { requestId, message })
+        } catch {
+          // Keep the native fallback available if renderer IPC has failed.
+        }
+      }
+      if (!window.isDestroyed()) {
+        void dialog.showMessageBox(window, {
+          type: 'warning',
+          title: 'Cannot Close paintSMYS',
+          message: 'The editor could not confirm that it is safe to close.',
+          detail: message,
+          buttons: ['OK'],
+          noLink: true,
+        }).catch(() => undefined)
+      }
+    },
+  })
+  closeHandshakes.set(window, closeHandshake)
+
+  window.on('close', (event) => {
+    if (!closeHandshake.handleClose()) event.preventDefault()
+  })
   window.on('maximize', sendMaximizedState)
   window.on('unmaximize', sendMaximizedState)
 
@@ -55,6 +86,19 @@ ipcMain.on('paintSMYS:window-control', (event, action: unknown) => {
   } else if (action === 'close') {
     window.close()
   }
+})
+
+ipcMain.on('paintSMYS:close-decision', (event, payload: unknown) => {
+  const owner = BrowserWindow.fromWebContents(event.sender)
+  if (!owner || typeof payload !== 'object' || payload === null) return
+  if (!('requestId' in payload) || !('decision' in payload)) return
+  const requestId = payload.requestId
+  const decision = payload.decision
+  if (!Number.isSafeInteger(requestId) || (decision !== 'allow' && decision !== 'cancel')) return
+
+  // The single window owns this handler instance; stale IDs are ignored by the handshake.
+  const handshake = closeHandshakes.get(owner)
+  handshake?.respond(requestId as number, decision)
 })
 
 ipcMain.handle('paintSMYS:is-maximized', (event) => {

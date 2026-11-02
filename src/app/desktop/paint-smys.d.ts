@@ -13,6 +13,9 @@ declare global {
         close: () => void
         isMaximized: () => Promise<boolean>
         onMaximizedChange: (callback: (maximized: boolean) => void) => () => void
+        onCloseRequest: (callback: (requestId: number) => void) => () => void
+        onCloseRequestFailure: (callback: (request: { requestId: number; message: string }) => void) => () => void
+        respondToCloseRequest: (requestId: number, decision: 'allow' | 'cancel') => void
       }
     }
   }

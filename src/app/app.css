@@ -94,6 +94,37 @@ h1 { margin: 0; color: #181818; font-size: 22px; font-weight: 700; }
 .new-project-note span { margin-right: 5px; color: #000080; }
 .win95-button--primary { font-weight: 700; }
 
+.close-project-dialog {
+  width: min(420px, calc(100vw - 32px));
+  padding: 0;
+  border: 2px solid;
+  border-color: #fff #404040 #404040 #fff;
+  border-radius: 0;
+  background: #c0c0c0;
+  color: #181818;
+  box-shadow: 2px 2px 0 #000;
+}
+.close-project-dialog::backdrop { background: rgb(0 0 0 / 28%); }
+.close-project-dialog__titlebar {
+  min-height: 28px;
+  padding: 6px 8px;
+  background: #000080;
+  color: #fff;
+  font-weight: 700;
+}
+.close-project-dialog__body { padding: 18px 16px 14px; }
+.close-project-dialog__body p { margin: 0 0 14px; font-size: 14px; }
+.close-project-dialog__message {
+  margin: -4px 0 13px;
+  padding: 7px;
+  border: 1px solid #808080;
+  background: #eee;
+  line-height: 1.4;
+}
+.close-project-dialog__actions { display: flex; justify-content: flex-end; gap: 8px; }
+.close-project-dialog__button { min-width: 82px; min-height: 28px; padding: 3px 10px; }
+.close-project-dialog__button:disabled { color: #777; cursor: wait; }
+
 @media (max-width: 600px) {
   .startup-window { min-height: 100vh; }
   .welcome-screen, .new-project-screen { padding: 28px 16px 20px; }
