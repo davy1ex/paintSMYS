@@ -2,12 +2,14 @@ import { contextBridge, ipcRenderer } from 'electron'
 import type { ProjectSaveRequest, ProjectSaveSelection } from '../../application/project-save-port'
 import type { ProjectOpenSelection } from '../../application/project-open-port'
 import type { PngExportRequest, PngExportSelection } from '../../application/export-png-port'
+import type { PluginCatalog } from '../../application/plugins/plugin-api'
 
 contextBridge.exposeInMainWorld('paintSMYS', {
   platform: process.platform,
   openProject: () => ipcRenderer.invoke('paintSMYS:open-project') as Promise<ProjectOpenSelection>,
   saveProject: (request: ProjectSaveRequest) => ipcRenderer.invoke('paintSMYS:save-project', request) as Promise<ProjectSaveSelection>,
   exportPng: (request: PngExportRequest) => ipcRenderer.invoke('paintSMYS:export-png', request) as Promise<PngExportSelection>,
+  listPlugins: () => ipcRenderer.invoke('paintSMYS:list-plugins') as Promise<PluginCatalog>,
   windowControls: {
     minimize: () => ipcRenderer.send('paintSMYS:window-control', 'minimize'),
     toggleMaximize: () => ipcRenderer.send('paintSMYS:window-control', 'toggle-maximize'),

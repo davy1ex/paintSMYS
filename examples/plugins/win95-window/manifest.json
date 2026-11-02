@@ -1,0 +1,13 @@
+{
+  "id": "com.paintsmys.example.win95-window",
+  "name": "Win95 Window",
+  "version": "1.0.0",
+  "apiVersion": 0,
+  "entry": "index.js",
+  "commands": [
+    {
+      "id": "generate-win95-window",
+      "name": "Generate Win95 Window"
+    }
+  ]
+}

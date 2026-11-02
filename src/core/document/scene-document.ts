@@ -46,6 +46,7 @@ export type TextStyleRun = {
 }
 
 export type SceneObject = RectangleObject | TextObject
+export type NewSceneObject = Omit<RectangleObject, 'id'> | Omit<TextObject, 'id'>
 
 export type SceneDocument = {
   schemaVersion: typeof SCENE_SCHEMA_VERSION
@@ -198,6 +199,31 @@ export function addTextObject(
         ...(position.runs === undefined ? {} : { runs: position.runs }),
       },
     ],
+  })
+}
+
+/** Append a complete batch of standard objects, assigning IDs and validating atomically. */
+export function appendSceneObjects(document: SceneDocument, values: unknown): SceneDocument {
+  if (!Array.isArray(values) || values.length === 0) {
+    throw new DocumentValidationError('At least one scene object is required.')
+  }
+
+  const ids = new Set(document.objects.map((object) => object.id))
+  const additions = values.map((value, index) => {
+    if (!isRecord(value)) throw new DocumentValidationError(`Object ${index + 1} must be an object.`)
+    if (Object.hasOwn(value, 'id')) {
+      throw new DocumentValidationError(`Object ${index + 1} must not provide an ID.`)
+    }
+
+    let id = createId()
+    while (ids.has(id)) id = createId()
+    ids.add(id)
+    return { ...value, id }
+  })
+
+  return validateSceneDocument({
+    ...document,
+    objects: [...document.objects, ...additions],
   })
 }
 

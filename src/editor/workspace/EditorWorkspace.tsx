@@ -2,6 +2,7 @@ import { forwardRef, useEffect, useImperativeHandle, useRef, useState, type Mous
 import { addRectangle, addTextObject, DEFAULT_TEXT_FONT_SIZE, MAX_TEXT_LENGTH, moveObject, removeObject, updateRectangleObjectProperties, updateTextObject, updateTextObjectProperties, type RectangleGeometry, type RectangleObjectProperties, type SceneDocument, type SceneObject, type TextObjectProperties } from '../../core/document/scene-document'
 import type { ProjectSession } from '../../application/project-session'
 import type { ProjectSaveMode } from '../../application/project-save-port'
+import type { PluginMenuCommand } from '../../application/plugins/plugin-api'
 import { findTopmostObjectAtPoint, getSceneObjectBounds, isGestureLongEnough, normalizeRectangle, transformPoint, transformVector, translateRectangle, type NormalizedRectangle, type Point } from './rectangle-geometry'
 import EditorMenuBar from './EditorMenuBar'
 import PropertyInspector, { type PropertyInspectorHandle } from './PropertyInspector'
@@ -31,6 +32,10 @@ type EditorWorkspaceProps = {
   onUndo: () => void
   onRedo: () => void
   onDocumentChange: (previousDocument: SceneDocument, document: SceneDocument) => void
+  pluginCommands: PluginMenuCommand[]
+  pluginErrors: string[]
+  isRunningPluginCommand: boolean
+  onPluginCommand: (command: PluginMenuCommand) => void
 }
 
 type TextDraft = {
@@ -124,6 +129,10 @@ const EditorWorkspace = forwardRef<EditorWorkspaceHandle, EditorWorkspaceProps>(
   onUndo,
   onRedo,
   onDocumentChange,
+  pluginCommands,
+  pluginErrors,
+  isRunningPluginCommand,
+  onPluginCommand,
 }, ref) {
   const canvasRef = useRef<HTMLDivElement>(null)
   const svgRef = useRef<SVGSVGElement>(null)
@@ -635,6 +644,10 @@ const EditorWorkspace = forwardRef<EditorWorkspaceHandle, EditorWorkspaceProps>(
         onUndo={onUndo}
         onRedo={onRedo}
         onMockAction={(action) => setMockActionMessage(`${action} — mock action`)}
+        pluginCommands={pluginCommands}
+        pluginErrors={pluginErrors}
+        isRunningPluginCommand={isRunningPluginCommand}
+        onPluginCommand={onPluginCommand}
       />
       <div className="editor-toolbar" aria-label="Editor status">
         <div className="editor-project-mark" aria-hidden="true">P</div>

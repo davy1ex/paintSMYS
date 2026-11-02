@@ -7,6 +7,8 @@ import type { ProjectOpenPort } from '../application/project-open-port'
 import type { ProjectSaveMode, ProjectSavePort } from '../application/project-save-port'
 import type { SaveProjectSessionResult } from '../application/save-project-session'
 import type { SceneDocument } from '../core/document/scene-document'
+import { createPluginCommandTransaction } from '../application/plugins/plugin-command-transaction'
+import type { PluginMenuCommand, PluginRuntime, PluginRuntimeFactory } from '../application/plugins/plugin-api'
 import { mergeSavedProjectSession, saveProjectSession } from '../application/save-project-session'
 import EditorWorkspace, { type EditorWorkspaceHandle } from '../editor/workspace/EditorWorkspace'
 import CloseProjectDialog, { type ClosePrompt } from './CloseProjectDialog'
@@ -16,9 +18,10 @@ import './app.css'
 
 type AppProps = {
   projectAdapter: ProjectOpenPort & Partial<ProjectSavePort & PngExportPort>
+  pluginRuntimeFactory?: PluginRuntimeFactory
 }
 
-function App({ projectAdapter }: AppProps) {
+function App({ projectAdapter, pluginRuntimeFactory }: AppProps) {
   const [screen, setScreen] = useState<'welcome' | 'new-project'>('welcome')
   const [session, setSession] = useState<ProjectSession | null>(null)
   const [editorSessionVersion, setEditorSessionVersion] = useState(0)
@@ -27,10 +30,15 @@ function App({ projectAdapter }: AppProps) {
   const [exporting, setExporting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [statusMessage, setStatusMessage] = useState('')
+  const [pluginCommands, setPluginCommands] = useState<PluginMenuCommand[]>([])
+  const [pluginErrors, setPluginErrors] = useState<string[]>([])
+  const [isRunningPluginCommand, setIsRunningPluginCommand] = useState(false)
   const [closePrompt, setClosePrompt] = useState<ClosePrompt | null>(null)
   const sessionRef = useRef<ProjectSession | null>(null)
   const editorWorkspaceRef = useRef<EditorWorkspaceHandle>(null)
   const historyRef = useRef<DocumentHistory | null>(null)
+  const sessionGenerationRef = useRef(0)
+  const pluginRuntimeRef = useRef<PluginRuntime | null>(null)
   const savingRef = useRef(false)
   const exportingRef = useRef(false)
   const closePromptRef = useRef<ClosePrompt | null>(null)
@@ -42,6 +50,7 @@ function App({ projectAdapter }: AppProps) {
 
   function setActiveSession(nextSession: ProjectSession, resetEditorState = false) {
     if (resetEditorState) {
+      sessionGenerationRef.current += 1
       setEditorSessionVersion((version) => version + 1)
       historyRef.current = new DocumentHistory(nextSession.isDirty ? null : nextSession.document)
     }
@@ -100,6 +109,31 @@ function App({ projectAdapter }: AppProps) {
     return () => window.removeEventListener('beforeunload', protectBrowserClose)
   }, [])
 
+  useEffect(() => {
+    if (!pluginRuntimeFactory) return
+    let isDisposed = false
+    const runtime = pluginRuntimeFactory({
+      beginCommand: (sessionToken) => beginPluginCommand(sessionToken),
+      showError: (message) => setError(message),
+    })
+    pluginRuntimeRef.current = runtime
+    void runtime.load().then((result) => {
+      if (isDisposed) return
+      setPluginCommands(result.commands)
+      setPluginErrors(result.errors)
+    }).catch((loadError: unknown) => {
+      if (isDisposed) return
+      const message = loadError instanceof Error ? loadError.message : 'The installed plugins could not be loaded.'
+      setPluginCommands([])
+      setPluginErrors([message])
+    })
+    return () => {
+      isDisposed = true
+      runtime.dispose()
+      if (pluginRuntimeRef.current === runtime) pluginRuntimeRef.current = null
+    }
+  }, [pluginRuntimeFactory])
+
   async function openProject() {
     setBusy(true)
     setError(null)
@@ -147,6 +181,40 @@ function App({ projectAdapter }: AppProps) {
       current.document !== previousDocument || previousDocument === document
     ) return
     publishDocumentChange(current, document, history, true)
+  }
+
+  function beginPluginCommand(sessionToken: number) {
+    const current = sessionRef.current
+    const history = historyRef.current
+    if (sessionGenerationRef.current !== sessionToken || !current || !history) {
+      throw new Error('There is no active project for this plugin command.')
+    }
+    const sourceDocument = current.document
+    return createPluginCommandTransaction(sourceDocument, (nextDocument) => {
+      const activeSession = sessionRef.current
+      if (
+        sessionGenerationRef.current !== sessionToken || historyRef.current !== history ||
+        !activeSession || activeSession.document !== sourceDocument
+      ) {
+        throw new Error('The active project or document changed while the plugin command was running. Run the command again.')
+      }
+      publishDocumentChange(activeSession, nextDocument, history, true)
+    })
+  }
+
+  async function runPluginCommand(command: PluginMenuCommand) {
+    const runtime = pluginRuntimeRef.current
+    if (!runtime || isRunningPluginCommand) return
+    setIsRunningPluginCommand(true)
+    setError(null)
+    try {
+      await runtime.invoke(command.pluginId, command.id, sessionGenerationRef.current)
+    } catch (commandError) {
+      const message = commandError instanceof Error ? commandError.message : 'The plugin command failed.'
+      setError(`${command.pluginName}: ${message}`)
+    } finally {
+      setIsRunningPluginCommand(false)
+    }
   }
 
   function navigateDocumentHistory(
@@ -295,6 +363,10 @@ function App({ projectAdapter }: AppProps) {
           onUndo={() => navigateDocumentHistory(session.projectId, session.document, 'undo')}
           onRedo={() => navigateDocumentHistory(session.projectId, session.document, 'redo')}
           onDocumentChange={(previous, document) => updateDocument(session.projectId, previous, document)}
+          pluginCommands={pluginCommands}
+          pluginErrors={pluginErrors}
+          isRunningPluginCommand={isRunningPluginCommand}
+          onPluginCommand={(command) => void runPluginCommand(command)}
         />
         <CloseProjectDialog
           request={closePrompt}

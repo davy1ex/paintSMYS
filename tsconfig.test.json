@@ -15,6 +15,7 @@
     "src/core/**/*.ts",
     "src/app/desktop/window/close-handshake.ts",
     "src/app/desktop/project-storage.ts",
+    "src/app/desktop/plugin-loader.ts",
     "src/app/desktop/png-export.ts",
     "src/editor/workspace/rectangle-geometry.ts",
     "src/editor/workspace/SceneSvgContent.tsx",

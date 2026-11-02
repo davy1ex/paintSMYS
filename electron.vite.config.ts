@@ -21,6 +21,7 @@ export default defineConfig({
   },
   renderer: {
     root: process.cwd(),
+    publicDir: resolve(process.cwd(), 'src/app/desktop/plugins/runtime-assets'),
     build: {
       outDir: resolve(process.cwd(), 'dist/renderer'),
       emptyOutDir: true,

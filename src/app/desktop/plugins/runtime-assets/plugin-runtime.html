@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'unsafe-inline' blob:; connect-src 'none'; img-src data:; style-src 'none'; font-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; navigate-to 'none'; frame-src 'none'; worker-src 'none'"
+    />
+    <title>paintSMYS Plugin Runtime</title>
+  </head>
+  <body>
+    <script>
+      (() => {
+        const handlers = new Map()
+        const pending = new Map()
+        let requestSequence = 0
+        let initialized = false
+        const send = (message) => parent.postMessage(message, '*')
+        const messageError = (error) => error instanceof Error ? error.message : String(error)
+        const reportError = (message) => send({ kind: 'runtime-error', message: String(message).slice(0, 500) })
+
+        window.addEventListener('error', (event) => reportError(event.message || 'The plugin script failed.'))
+        window.addEventListener('unhandledrejection', (event) => reportError(messageError(event.reason)))
+
+        function makeCommandApi(invocationId) {
+          const request = (method, args) => new Promise((resolve, reject) => {
+            const requestId = `${invocationId}:${++requestSequence}`
+            pending.set(requestId, { resolve, reject })
+            send({ kind: 'request', invocationId, requestId, method, args })
+          })
+          return Object.freeze({
+            snapshotDocument: () => request('snapshot-document', []),
+            addObjects: (objects) => request('add-objects', [objects]),
+            showError: (message) => request('show-error', [message]),
+          })
+        }
+
+        async function loadPlugin(data) {
+          if (initialized) return
+          initialized = true
+          const expected = new Set(data.commandIds)
+          const blobUrl = URL.createObjectURL(new Blob([data.source], { type: 'text/javascript' }))
+          const script = document.createElement('script')
+          script.src = blobUrl
+          script.onerror = () => {
+            URL.revokeObjectURL(blobUrl)
+            send({ kind: 'load-error', message: 'The plugin entry point could not be executed.' })
+          }
+          script.onload = async () => {
+            URL.revokeObjectURL(blobUrl)
+            try {
+              const plugin = globalThis.paintSMYSPlugin
+              if (!plugin || typeof plugin.activate !== 'function') {
+                throw new Error('The entry point must define paintSMYSPlugin.activate(api).')
+              }
+              const activationApi = Object.freeze({
+                registerCommand(commandId, handler) {
+                  if (typeof commandId !== 'string' || !expected.has(commandId)) {
+                    throw new Error('The plugin registered a command that is not declared in its manifest.')
+                  }
+                  if (handlers.has(commandId) || typeof handler !== 'function') {
+                    throw new Error('Plugin command IDs must be registered once with a function.')
+                  }
+                  handlers.set(commandId, handler)
+                },
+              })
+              await plugin.activate(activationApi)
+              send({ kind: 'ready', commandIds: Array.from(handlers.keys()) })
+            } catch (error) {
+              send({ kind: 'load-error', message: messageError(error).slice(0, 500) })
+            }
+          }
+          document.head.appendChild(script)
+        }
+
+        window.addEventListener('message', async (event) => {
+          if (event.source !== parent) return
+          const data = event.data
+          if (!data || typeof data !== 'object') return
+          if (data.kind === 'initialize' && typeof data.source === 'string' && Array.isArray(data.commandIds)) {
+            await loadPlugin(data)
+            return
+          }
+          if (data.kind === 'response' && typeof data.requestId === 'string') {
+            const entry = pending.get(data.requestId)
+            if (!entry) return
+            pending.delete(data.requestId)
+            if (data.success) entry.resolve(data.value)
+            else entry.reject(new Error(typeof data.message === 'string' ? data.message : 'The host rejected the plugin request.'))
+            return
+          }
+          if (data.kind === 'invoke' && typeof data.commandId === 'string' && typeof data.invocationId === 'string') {
+            const handler = handlers.get(data.commandId)
+            if (!handler) {
+              send({ kind: 'finished', invocationId: data.invocationId, success: false, message: 'The plugin command is not registered.' })
+              return
+            }
+            try {
+              await handler(makeCommandApi(data.invocationId))
+              send({ kind: 'finished', invocationId: data.invocationId, success: true })
+            } catch (error) {
+              send({ kind: 'finished', invocationId: data.invocationId, success: false, message: messageError(error).slice(0, 500) })
+            }
+          }
+        })
+      })()
+    </script>
+  </body>
+</html>

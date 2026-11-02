@@ -1,4 +1,6 @@
 import { Fragment, useEffect, useRef, useState } from 'react'
+import type { PluginMenuCommand } from '../../application/plugins/plugin-api'
+import { getPluginMenuEmptyMessage } from '../../application/plugins/plugin-api'
 
 const fileActions = ['New Project', 'Open Project…', 'Save', 'Save As…', 'Export PNG…', 'Exit']
 
@@ -15,6 +17,10 @@ type EditorMenuBarProps = {
   onUndo: () => void
   onRedo: () => void
   onMockAction: (action: string) => void
+  pluginCommands: PluginMenuCommand[]
+  pluginErrors: string[]
+  isRunningPluginCommand: boolean
+  onPluginCommand: (command: PluginMenuCommand) => void
 }
 
 function EditorMenuBar({
@@ -30,28 +36,38 @@ function EditorMenuBar({
   onUndo,
   onRedo,
   onMockAction,
+  pluginCommands,
+  pluginErrors,
+  isRunningPluginCommand,
+  onPluginCommand,
 }: EditorMenuBarProps) {
   const [fileMenuOpen, setFileMenuOpen] = useState(false)
   const [editMenuOpen, setEditMenuOpen] = useState(false)
+  const [pluginMenuOpen, setPluginMenuOpen] = useState(false)
   const fileGroupRef = useRef<HTMLDivElement>(null)
   const editGroupRef = useRef<HTMLDivElement>(null)
+  const pluginGroupRef = useRef<HTMLDivElement>(null)
   const fileButtonRef = useRef<HTMLButtonElement>(null)
   const editButtonRef = useRef<HTMLButtonElement>(null)
+  const pluginButtonRef = useRef<HTMLButtonElement>(null)
   const fileMenuRef = useRef<HTMLDivElement>(null)
   const editMenuRef = useRef<HTMLDivElement>(null)
+  const pluginMenuRef = useRef<HTMLDivElement>(null)
   const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform)
+  const pluginMenuEmptyMessage = getPluginMenuEmptyMessage(pluginCommands.length, pluginErrors.length)
 
   useEffect(() => {
-    if (!fileMenuOpen && !editMenuOpen) return
+    if (!fileMenuOpen && !editMenuOpen && !pluginMenuOpen) return
 
-    const activeMenu = editMenuOpen ? editMenuRef.current : fileMenuRef.current
+    const activeMenu = pluginMenuOpen ? pluginMenuRef.current : editMenuOpen ? editMenuRef.current : fileMenuRef.current
     activeMenu?.querySelector<HTMLButtonElement>('[role="menuitem"]:not(:disabled)')?.focus()
 
     const handlePointerDown = (event: PointerEvent) => {
       const target = event.target as Node
-      if (!fileGroupRef.current?.contains(target) && !editGroupRef.current?.contains(target)) {
+      if (!fileGroupRef.current?.contains(target) && !editGroupRef.current?.contains(target) && !pluginGroupRef.current?.contains(target)) {
         setFileMenuOpen(false)
         setEditMenuOpen(false)
+        setPluginMenuOpen(false)
       }
     }
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -59,7 +75,9 @@ function EditorMenuBar({
       event.preventDefault()
       setFileMenuOpen(false)
       setEditMenuOpen(false)
-      if (editMenuOpen) editButtonRef.current?.focus()
+      setPluginMenuOpen(false)
+      if (pluginMenuOpen) pluginButtonRef.current?.focus()
+      else if (editMenuOpen) editButtonRef.current?.focus()
       else fileButtonRef.current?.focus()
     }
 
@@ -69,7 +87,7 @@ function EditorMenuBar({
       document.removeEventListener('pointerdown', handlePointerDown)
       document.removeEventListener('keydown', handleKeyDown)
     }
-  }, [editMenuOpen, fileMenuOpen])
+  }, [editMenuOpen, fileMenuOpen, pluginMenuOpen])
 
   const moveMenuFocus = (menuRef: React.RefObject<HTMLDivElement | null>, key: string) => {
     const items = menuRef.current?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]:not(:disabled)')
@@ -92,6 +110,10 @@ function EditorMenuBar({
     setEditMenuOpen(false)
     editButtonRef.current?.focus()
   }
+  const closePluginMenu = () => {
+    setPluginMenuOpen(false)
+    pluginButtonRef.current?.focus()
+  }
 
   return (
     <nav className="editor-menu-bar" aria-label="Main menu">
@@ -105,6 +127,7 @@ function EditorMenuBar({
           aria-controls="editor-file-menu"
           onClick={() => {
             setEditMenuOpen(false)
+            setPluginMenuOpen(false)
             setFileMenuOpen((open) => !open)
           }}
         >
@@ -167,6 +190,7 @@ function EditorMenuBar({
           aria-controls="editor-edit-menu"
           onClick={() => {
             setFileMenuOpen(false)
+            setPluginMenuOpen(false)
             setEditMenuOpen((open) => !open)
           }}
         >
@@ -206,6 +230,74 @@ function EditorMenuBar({
             >
               <span>Redo</span><span className="editor-edit-menu__shortcut">{isMac ? '⌘⇧Z' : 'Ctrl+Y / Ctrl+Shift+Z'}</span>
             </button>
+          </div>
+        )}
+      </div>
+      <div className="editor-menu-group" ref={pluginGroupRef}>
+        <button
+          className="editor-menu-trigger"
+          type="button"
+          ref={pluginButtonRef}
+          aria-haspopup="menu"
+          aria-expanded={pluginMenuOpen}
+          aria-controls="editor-plugin-menu"
+          onClick={() => {
+            setFileMenuOpen(false)
+            setEditMenuOpen(false)
+            setPluginMenuOpen((open) => !open)
+          }}
+        >
+          Plugins
+        </button>
+        {pluginMenuOpen && (
+          <div
+            className="editor-file-menu editor-plugin-menu"
+            id="editor-plugin-menu"
+            role="menu"
+            aria-label="Plugins"
+            ref={pluginMenuRef}
+            onKeyDown={(event) => {
+              if (['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) {
+                event.preventDefault()
+                moveMenuFocus(pluginMenuRef, event.key)
+              }
+            }}
+          >
+            {pluginMenuEmptyMessage && (
+              <button className="editor-file-menu__item" type="button" role="menuitem" tabIndex={-1} disabled>
+                {pluginMenuEmptyMessage}
+              </button>
+            )}
+            {pluginCommands.map((command) => (
+              <button
+                className="editor-file-menu__item"
+                type="button"
+                role="menuitem"
+                tabIndex={-1}
+                key={`${command.pluginId}/${command.id}`}
+                disabled={isRunningPluginCommand}
+                onClick={() => {
+                  onPluginCommand(command)
+                  closePluginMenu()
+                }}
+              >
+                {isRunningPluginCommand ? `${command.name}…` : command.name}
+              </button>
+            ))}
+            {pluginErrors.length > 0 && <div className="editor-file-menu__separator" role="separator" />}
+            {pluginErrors.map((pluginError, index) => (
+              <button
+                className="editor-file-menu__item editor-plugin-menu__error"
+                type="button"
+                role="menuitem"
+                tabIndex={-1}
+                key={`${index}-${pluginError}`}
+                disabled
+                title={pluginError}
+              >
+                {pluginError}
+              </button>
+            ))}
           </div>
         )}
       </div>

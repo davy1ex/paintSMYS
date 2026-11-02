@@ -2,6 +2,8 @@
 
 Локальный объектный графический редактор. Ближайшая продуктовая цель — первый внешний плагин; roadmap, продуктовые требования и целевая архитектура описаны в [`docs/ROADMAP.md`](docs/ROADMAP.md), [`docs/PRD.md`](docs/PRD.md) и [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
+Для установки локальных Desktop action-плагинов и контракта API v0 смотри [`docs/PLUGIN_API_V0.md`](docs/PLUGIN_API_V0.md); внешний пример находится в [`examples/plugins/win95-window`](examples/plugins/win95-window).
+
 `src/app` содержит Electron main/preload, browser entrypoint и общий React App. `src/editor` — общий UI редактора. Electron и Browser собираются отдельно из корневого `index.html`.
 
 ## Разработка

@@ -15,10 +15,12 @@
 .editor-menu-trigger:hover, .editor-menu-trigger[aria-expanded="true"] { border-color: #fff #808080 #808080 #fff; }
 .editor-menu-trigger:focus-visible { outline: 1px dotted #111; outline-offset: -3px; }
 .editor-file-menu { position: absolute; z-index: 5; top: calc(100% + 4px); left: 0; width: 176px; padding: 2px; border: 1px solid; border-color: #fff #404040 #404040 #fff; background: #c0c0c0; box-shadow: 1px 1px 0 #000; }
+.editor-plugin-menu { width: max-content; min-width: 190px; max-width: min(420px, calc(100vw - 24px)); }
 .editor-file-menu__item { display: block; width: 100%; min-height: 25px; padding: 4px 8px 4px 25px; border: 0; background: transparent; color: #111; font: inherit; text-align: left; white-space: nowrap; cursor: default; }
 .editor-file-menu__item:not(:disabled):hover, .editor-file-menu__item:not(:disabled):focus { outline: none; background: #000080; color: #fff; }
 .editor-file-menu__item:disabled, .editor-edit-menu__item:disabled { color: #777; text-shadow: 1px 1px #fff; }
 .editor-file-menu__separator { height: 1px; margin: 3px 2px 3px 21px; background: #808080; box-shadow: 0 1px #fff; }
+.editor-plugin-menu__error { white-space: normal; overflow-wrap: anywhere; }
 .editor-edit-menu { position: absolute; z-index: 5; top: calc(100% + 4px); left: 0; width: 250px; padding: 2px; border: 1px solid; border-color: #fff #404040 #404040 #fff; background: #c0c0c0; box-shadow: 1px 1px 0 #000; }
 .editor-edit-menu__item { display: flex; width: 100%; min-height: 25px; align-items: center; justify-content: space-between; gap: 18px; padding: 4px 8px 4px 25px; border: 0; background: transparent; color: #111; font: inherit; text-align: left; white-space: nowrap; cursor: default; }
 .editor-edit-menu__item:not(:disabled):hover, .editor-edit-menu__item:not(:disabled):focus { outline: none; background: #000080; color: #fff; }

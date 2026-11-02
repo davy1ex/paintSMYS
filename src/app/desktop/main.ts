@@ -1,7 +1,9 @@
 import { app, BrowserWindow, dialog, ipcMain, type WebContents } from 'electron'
 import { realpath, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
+import { pathToFileURL } from 'node:url'
 import type { PngExportRequest } from '../../application/export-png-port'
+import { loadInstalledPlugins } from './plugin-loader'
 import { inspectSaveAsTarget, readProjectFolder, saveExistingProjectFolder, saveProjectAsFolder } from './project-storage'
 import { exportPngFile } from './png-export'
 import { CloseHandshake } from './window/close-handshake'
@@ -10,6 +12,7 @@ const projectRoots = new WeakMap<WebContents, string>()
 const closeHandshakes = new WeakMap<BrowserWindow, CloseHandshake>()
 const pngExportDialogs = new WeakSet<BrowserWindow>()
 const closeAfterPngExportDialog = new WeakSet<BrowserWindow>()
+const trustedRendererUrls = new WeakMap<WebContents, string>()
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : 'The project operation failed.'
@@ -30,6 +33,7 @@ function createWindow(): void {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
+      webSecurity: true,
     },
   })
 
@@ -76,6 +80,21 @@ function createWindow(): void {
   window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
 
   const rendererUrl = process.env.ELECTRON_RENDERER_URL
+  const expectedRendererUrl = rendererUrl
+    ? new URL('desktop.html', rendererUrl).toString()
+    : pathToFileURL(join(__dirname, '../renderer/desktop.html')).toString()
+  const expectedPluginRuntimeUrl = new URL('plugin-runtime.html', expectedRendererUrl).toString()
+  trustedRendererUrls.set(window.webContents, expectedRendererUrl)
+  window.webContents.on('will-navigate', (event, navigationUrl) => {
+    if (navigationUrl !== expectedRendererUrl) event.preventDefault()
+  })
+  window.webContents.on('will-frame-navigate', (event) => {
+    if (event.isMainFrame) {
+      if (event.url !== expectedRendererUrl) event.preventDefault()
+      return
+    }
+    if (event.url !== expectedPluginRuntimeUrl && event.url !== 'about:blank') event.preventDefault()
+  })
   if (rendererUrl) {
     void window.loadURL(new URL('desktop.html', rendererUrl).toString())
   } else {
@@ -112,6 +131,14 @@ ipcMain.on('paintSMYS:close-decision', (event, payload: unknown) => {
 
 ipcMain.handle('paintSMYS:is-maximized', (event) => {
   return BrowserWindow.fromWebContents(event.sender)?.isMaximized() ?? false
+})
+
+ipcMain.handle('paintSMYS:list-plugins', async (event) => {
+  const owner = BrowserWindow.fromWebContents(event.sender)
+  if (!owner || event.senderFrame !== event.sender.mainFrame || event.senderFrame.url !== trustedRendererUrls.get(event.sender)) {
+    return { plugins: [], errors: ['Plugins can only be loaded by the paintSMYS editor window.'] }
+  }
+  return loadInstalledPlugins(join(app.getPath('userData'), 'plugins'))
 })
 
 ipcMain.handle('paintSMYS:open-project', async (event) => {
