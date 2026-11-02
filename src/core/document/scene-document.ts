@@ -35,6 +35,14 @@ export type TextObject = {
   fontFamily: string
   fontSize: number
   color: string
+  runs?: TextStyleRun[]
+}
+
+/** UTF-16 offsets into TextObject.text; start is inclusive and end is exclusive. */
+export type TextStyleRun = {
+  start: number
+  end: number
+  color: string
 }
 
 export type SceneObject = RectangleObject | TextObject
@@ -48,7 +56,7 @@ export type SceneDocument = {
 
 export type RectangleGeometry = Pick<RectangleObject, 'x' | 'y' | 'width' | 'height'>
 export type ObjectPosition = Pick<RectangleObject, 'x' | 'y'>
-export type TextObjectContent = Pick<TextObject, 'text'> & Partial<Pick<TextObject, 'fontFamily' | 'fontSize' | 'color'>>
+export type TextObjectContent = Pick<TextObject, 'text'> & Partial<Pick<TextObject, 'fontFamily' | 'fontSize' | 'color' | 'runs'>>
 
 export class DocumentValidationError extends Error {
   constructor(message: string) {
@@ -63,6 +71,54 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function isColor(value: unknown): value is string {
   return typeof value === 'string' && /^(#(?:[\da-f]{3}|[\da-f]{4}|[\da-f]{6}|[\da-f]{8})|transparent)$/i.test(value)
+}
+
+function isSurrogatePairBoundary(text: string, offset: number): boolean {
+  if (offset <= 0 || offset >= text.length) return true
+  const previous = text.charCodeAt(offset - 1)
+  const next = text.charCodeAt(offset)
+  return !(previous >= 0xd800 && previous <= 0xdbff && next >= 0xdc00 && next <= 0xdfff)
+}
+
+function validateTextRuns(text: string, value: unknown, objectIndex: number): TextStyleRun[] {
+  if (!Array.isArray(value)) throw new DocumentValidationError(`Object ${objectIndex + 1} has invalid text style runs.`)
+
+  let previousStart = -1
+  let previousEnd = 0
+  return value.map((item, runIndex): TextStyleRun => {
+    if (!isRecord(item)) {
+      throw new DocumentValidationError(`Object ${objectIndex + 1} text style run ${runIndex + 1} is invalid.`)
+    }
+    const { start, end, color } = item
+    if (!Number.isInteger(start) || !Number.isInteger(end) || (start as number) < 0 || (end as number) > text.length || (start as number) >= (end as number)) {
+      throw new DocumentValidationError(`Object ${objectIndex + 1} text style run ${runIndex + 1} has invalid UTF-16 offsets.`)
+    }
+    if ((start as number) < previousStart) {
+      throw new DocumentValidationError(`Object ${objectIndex + 1} text style runs must be sorted by start.`)
+    }
+    if ((start as number) < previousEnd) {
+      throw new DocumentValidationError(`Object ${objectIndex + 1} text style runs must not overlap.`)
+    }
+    if (!isSurrogatePairBoundary(text, start as number) || !isSurrogatePairBoundary(text, end as number)) {
+      throw new DocumentValidationError(`Object ${objectIndex + 1} text style run ${runIndex + 1} splits a UTF-16 surrogate pair.`)
+    }
+    if (!isColor(color)) {
+      throw new DocumentValidationError(`Object ${objectIndex + 1} text style run ${runIndex + 1} has an invalid color.`)
+    }
+
+    previousStart = start as number
+    previousEnd = end as number
+    return { start: start as number, end: end as number, color }
+  })
+}
+
+function textRunsEqual(left: TextStyleRun[] | undefined, right: TextStyleRun[] | undefined): boolean {
+  if (!left?.length && !right?.length) return true
+  if (left === undefined || right === undefined) return left === right
+  return left.length === right.length && left.every((run, index) => {
+    const other = right[index]
+    return run.start === other.start && run.end === other.end && run.color === other.color
+  })
 }
 
 export function createId(): string {
@@ -137,6 +193,7 @@ export function addTextObject(
         fontFamily: position.fontFamily ?? DEFAULT_TEXT_FONT_FAMILY,
         fontSize: position.fontSize ?? DEFAULT_TEXT_FONT_SIZE,
         color: position.color ?? DEFAULT_TEXT_COLOR,
+        ...(position.runs === undefined ? {} : { runs: position.runs }),
       },
     ],
   })
@@ -168,8 +225,39 @@ export function updateTextObject(document: SceneDocument, objectId: string, text
   }
 
   const objects = document.objects.slice()
-  objects[objectIndex] = { ...object, text }
+  const updatedObject = { ...object, text }
+  delete updatedObject.runs
+  objects[objectIndex] = updatedObject
   return validateSceneDocument({ ...document, objects })
+}
+
+/** Replace or clear the character colors on one TextObject. */
+export function setTextRuns(
+  document: SceneDocument,
+  objectId: string,
+  runs: TextStyleRun[] | undefined,
+): SceneDocument {
+  const objectIndex = document.objects.findIndex((object) => object.id === objectId)
+  if (objectIndex === -1) {
+    throw new DocumentValidationError(`Object "${objectId}" does not exist.`)
+  }
+
+  const object = document.objects[objectIndex]
+  if (object.type !== 'text') {
+    throw new DocumentValidationError(`Object "${objectId}" is not a text object.`)
+  }
+
+  const updatedObject: TextObject = { ...object }
+  if (runs === undefined) delete updatedObject.runs
+  else updatedObject.runs = runs
+
+  const objects = document.objects.slice()
+  objects[objectIndex] = updatedObject
+  const validated = validateSceneDocument({ ...document, objects })
+  const validatedObject = validated.objects[objectIndex]
+  if (validatedObject.type !== 'text') throw new DocumentValidationError(`Object "${objectId}" is not a text object.`)
+  if (textRunsEqual(object.runs, validatedObject.runs)) return document
+  return validated
 }
 
 export function moveObject(document: SceneDocument, objectId: string, nextPosition: ObjectPosition): SceneDocument {
@@ -231,7 +319,7 @@ export function validateSceneDocument(value: unknown): SceneDocument {
         throw new DocumentValidationError(`Object ${index + 1} has an invalid color.`)
       }
 
-      return {
+      const textObject: TextObject = {
         id: item.id,
         type: 'text',
         x: item.x as number,
@@ -241,6 +329,8 @@ export function validateSceneDocument(value: unknown): SceneDocument {
         fontSize: item.fontSize,
         color: item.color,
       }
+      if (item.runs !== undefined) textObject.runs = validateTextRuns(item.text, item.runs, index)
+      return textObject
     }
 
     if (![item.width, item.height].every((dimension) => typeof dimension === 'number' && Number.isFinite(dimension) && dimension > 0)) {

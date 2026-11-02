@@ -3,6 +3,9 @@ import { DocumentHistory } from '../src/application/document-history'
 import { getPngFileName, MAX_PNG_EXPORT_BYTES } from '../src/application/export-png-port'
 import { exportPngFile, validatePngBytes } from '../src/app/desktop/png-export'
 import { addRectangle, addTextObject, createSceneDocument, type SceneDocument } from '../src/core/document/scene-document'
+import { setTextRuns } from '../src/core/document/scene-document'
+import { createProjectManifest, parseProjectManifest, serializeProjectManifest } from '../src/core/project/project-manifest'
+import { openProjectSession } from '../src/application/project-session'
 import { renderSceneSvg } from '../src/editor/workspace/scene-svg-serialization'
 
 function makeScene(): SceneDocument {
@@ -60,6 +63,49 @@ assert.match(svg, /<tspan x="52" y="130">  English  <\/tspan>/)
 assert.ok(svg.indexOf('fill="#ff0000"') < svg.indexOf('font-family="Courier New, monospace"'))
 assert.doesNotMatch(svg, /stroke-dasharray|vector-effect|fill-opacity|class="scene-svg|checkerboard|selection/i)
 assert.equal(JSON.stringify(scene), originalScene, 'serializing the scene must not mutate the document')
+
+const styledSource = '  result = subprocess.run(\n    ["grim", "-o", output],\n    check=True\n)\n\nПривет 😀  <Paint> &  '
+const styledStart = styledSource.indexOf('result')
+const styledEnd = styledSource.indexOf('check=True') + 'check=True'.length
+let styledScene = addTextObject(createSceneDocument(640, 400), {
+  x: 12,
+  y: 14,
+  text: styledSource,
+})
+const styledObject = styledScene.objects[0]
+if (styledObject.type !== 'text') throw new Error('Expected a text object.')
+styledScene = setTextRuns(styledScene, styledObject.id, [
+  { start: styledStart, end: styledEnd, color: '#c00000' },
+  { start: styledSource.indexOf('Привет'), end: styledSource.length - 2, color: '#008000' },
+])
+
+const projectJson = serializeProjectManifest(createProjectManifest('styled-project', 'Styled Text', styledScene))
+assert.doesNotMatch(projectJson, /<\/?tspan|<text/i, 'project.json must store source text and ranges, not SVG markup')
+const reopened = openProjectSession(projectJson, '/styled-project')
+const reopenedText = reopened.document.objects[0]
+if (reopenedText.type !== 'text') throw new Error('Expected the opened object to remain text.')
+assert.equal(reopenedText.text, styledSource)
+assert.deepEqual(reopenedText.runs, [
+  { start: styledStart, end: styledEnd, color: '#c00000' },
+  { start: styledSource.indexOf('Привет'), end: styledSource.length - 2, color: '#008000' },
+])
+assert.equal(parseProjectManifest(projectJson).scene.objects.length, 1, 'styled text stays one scene object')
+assert.equal(serializeProjectManifest(parseProjectManifest(projectJson)), projectJson, 'a second Save preserves styled source and ranges')
+
+const styledSvg = renderSceneSvg(reopened.document)
+assert.equal((styledSvg.match(/<text\b/g) ?? []).length, 1, 'all colored fragments stay in one logical text block')
+assert.match(styledSvg, /<svg[^>]*width="640" height="400" viewBox="0 0 640 400"/)
+assert.deepEqual(
+  [...styledSvg.matchAll(/<tspan x="12" y="(\d+)">/g)].map((match) => Number(match[1])),
+  [34, 58, 82, 106, 130, 154],
+  'each line, including the blank line, keeps the original baseline spacing',
+)
+assert.match(styledSvg, /<tspan fill="#c00000">result = subprocess\.run\(/)
+assert.match(styledSvg, /<tspan fill="#008000">Привет 😀/)
+assert.match(styledSvg, /    \[&quot;grim&quot;, &quot;-o&quot;, output\],/)
+assert.match(styledSvg, /<tspan x="12" y="130"> <\/tspan>/)
+assert.match(styledSvg, /&lt;Paint&gt; &amp;/, 'styled text content is escaped instead of becoming SVG markup')
+assert.match(styledSvg, /&amp;<\/tspan><tspan>  <\/tspan>/, 'trailing spaces remain after the colored fragment')
 
 const savedScene = createSceneDocument(1920, 1080)
 const history = new DocumentHistory(savedScene)

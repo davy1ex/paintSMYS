@@ -7,7 +7,7 @@ import { saveProjectAsFolder, saveExistingProjectFolder, readProjectFolder } fro
 import { mergeSavedProjectSession, saveProjectSession } from '../src/application/save-project-session'
 import type { ProjectSavePort, ProjectSaveRequest } from '../src/application/project-save-port'
 import { createUntitledProjectSession, openProjectSession, updateProjectSessionDocument, type ProjectSession } from '../src/application/project-session'
-import { addRectangle, moveObject, removeObject } from '../src/core/document/scene-document'
+import { addRectangle, addTextObject, moveObject, removeObject } from '../src/core/document/scene-document'
 import { parseProjectManifest } from '../src/core/project/project-manifest'
 
 async function withTempDirectory(run: (directory: string) => Promise<void>) {
@@ -57,6 +57,50 @@ test('New 1920×1080 project saves to a project folder and restores the Scene ID
     assert.equal(reopened.document.id, original.document.id)
     assert.equal(reopened.document.artboard.width, 1920)
     assert.equal(reopened.document.artboard.height, 1080)
+  })
+})
+
+test('Styled Text runs save into project.json and return after Open as one object', async () => {
+  await withTempDirectory(async (directory) => {
+    const parent = join(directory, 'projects')
+    await mkdir(parent)
+    const target = join(parent, 'Styled Text')
+    const original = createUntitledProjectSession(640, 480)
+    const source = '  let greeting = "Привет 😀"\n    print(greeting)\n'
+    const greetingStart = source.indexOf('Привет')
+    const created = addTextObject(original.document, {
+      x: 24,
+      y: 32,
+      text: source,
+      runs: [
+        { start: 2, end: 15, color: '#0000cc' },
+        { start: greetingStart, end: greetingStart + 'Привет 😀'.length, color: '#008000' },
+      ],
+    })
+    const saved = await saveProjectSession(
+      updateProjectSessionDocument(original, created),
+      diskSavePort(target),
+    )
+
+    assert.equal(saved.status, 'saved')
+    if (saved.status !== 'saved') return
+    assert.equal(saved.session.projectRoot, target)
+    assert.equal(saved.session.isDirty, false)
+    const { manifestText } = await readProjectFolder(target)
+    const manifest = parseProjectManifest(manifestText)
+    assert.equal(manifest.scene.objects.length, 1)
+    assert.equal(manifest.scene.objects[0].type, 'text')
+    if (manifest.scene.objects[0].type !== 'text') assert.fail('Expected a text object')
+    assert.equal(manifest.scene.objects[0].text, source)
+    assert.deepEqual(manifest.scene.objects[0].runs, [
+      { start: 2, end: 15, color: '#0000cc' },
+      { start: greetingStart, end: greetingStart + 'Привет 😀'.length, color: '#008000' },
+    ])
+    assert.equal(manifestText.includes('<tspan'), false)
+
+    const reopened = openProjectSession(manifestText, target)
+    assert.equal(reopened.document.objects.length, 1)
+    assert.deepEqual(reopened.document.objects[0], manifest.scene.objects[0])
   })
 })
 

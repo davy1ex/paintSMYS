@@ -167,9 +167,9 @@ const EditorWorkspace = forwardRef<EditorWorkspaceHandle, EditorWorkspaceProps>(
     const draft = textDraftRef.current
     if (!draft) return false
     setActiveTextDraft(null)
-    if (!draft.text.trim()) return true
 
     if (draft.mode === 'create') {
+      if (!draft.text.trim()) return true
       const nextDocument = addTextObject(document, { x: draft.x, y: draft.y, text: draft.text })
       const created = nextDocument.objects[nextDocument.objects.length - 1]
       setSelectedObjectId(created.id)

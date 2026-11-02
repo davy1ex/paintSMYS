@@ -1,4 +1,4 @@
-import type { SceneDocument } from '../../core/document/scene-document'
+import type { SceneDocument, TextStyleRun } from '../../core/document/scene-document'
 
 export type ScenePositionPreview = {
   objectId: string
@@ -9,6 +9,26 @@ export type ScenePositionPreview = {
 type SceneSvgContentProps = {
   document: SceneDocument
   positionPreview?: ScenePositionPreview | null
+}
+
+type TextSegment = { text: string; color?: string }
+
+function getLineSegments(line: string, lineStart: number, runs: TextStyleRun[]): TextSegment[] {
+  const lineEnd = lineStart + line.length
+  const segments: TextSegment[] = []
+  let cursor = lineStart
+
+  for (const run of runs) {
+    if (run.end <= lineStart || run.start >= lineEnd) continue
+    const start = Math.max(run.start, lineStart)
+    const end = Math.min(run.end, lineEnd)
+    if (start > cursor) segments.push({ text: line.slice(cursor - lineStart, start - lineStart) })
+    if (end > start) segments.push({ text: line.slice(start - lineStart, end - lineStart), color: run.color })
+    cursor = end
+  }
+
+  if (cursor < lineEnd) segments.push({ text: line.slice(cursor - lineStart) })
+  return segments
 }
 
 /** Shared Artboard background and object rendering for the editor and exports. */
@@ -22,6 +42,7 @@ export function SceneSvgContent({ document, positionPreview = null }: SceneSvgCo
         const position = positionPreview?.objectId === object.id ? positionPreview : object
         if (object.type === 'text') {
           const lineHeight = object.fontSize * 1.2
+          let lineStart = 0
           return (
             <text
               key={object.id}
@@ -32,11 +53,31 @@ export function SceneSvgContent({ document, positionPreview = null }: SceneSvgCo
               pointerEvents="none"
               aria-label={object.text}
             >
-              {object.text.split('\n').map((line, index) => (
-                <tspan key={index} x={position.x} y={position.y + object.fontSize + index * lineHeight}>
-                  {line || '\u00a0'}
-                </tspan>
-              ))}
+              {object.text.split('\n').map((line, index) => {
+                const currentLineStart = lineStart
+                lineStart += line.length + 1
+                const baseline = position.y + object.fontSize + index * lineHeight
+                if (!object.runs?.length) {
+                  return (
+                    <tspan key={index} x={position.x} y={baseline}>
+                      {line || '\u00a0'}
+                    </tspan>
+                  )
+                }
+
+                const segments = getLineSegments(line, currentLineStart, object.runs)
+                return (
+                  <tspan key={index} x={position.x} y={baseline}>
+                    {segments.length === 0
+                      ? '\u00a0'
+                      : segments.map((segment, segmentIndex) => (
+                        <tspan key={segmentIndex} {...(segment.color ? { fill: segment.color } : {})}>
+                          {segment.text}
+                        </tspan>
+                      ))}
+                  </tspan>
+                )
+              })}
             </text>
           )
         }

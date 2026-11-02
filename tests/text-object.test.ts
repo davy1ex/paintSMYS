@@ -13,6 +13,7 @@ import {
   DocumentValidationError,
   moveObject,
   removeObject,
+  setTextRuns,
   updateTextObject,
   validateSceneDocument,
 } from '../src/core/document/scene-document'
@@ -79,6 +80,98 @@ test('updateTextObject is immutable, supports Unicode, and returns the same scen
   assert.throws(() => updateTextObject(rectangleScene, rectangleScene.objects[0].id, 'x'), /not a text object/)
 })
 
+test('TextObject style runs validate UTF-16 ranges, preserve source text, and remain one object', () => {
+  const sourceText = '  code\nПривет 😀  '
+  const emojiStart = sourceText.indexOf('😀')
+  const scene = createSceneDocument(800, 600)
+  const styled = addTextObject(scene, {
+    x: 18,
+    y: 24,
+    text: sourceText,
+    runs: [
+      { start: 2, end: 6, color: '#cc0000' },
+      { start: 6, end: 12, color: '#0000cc' },
+      { start: emojiStart, end: emojiStart + 2, color: '#008800' },
+    ],
+  })
+  const object = styled.objects[0]
+  if (object.type !== 'text') assert.fail('Expected a text object')
+  const before = structuredClone(styled)
+
+  assert.equal(styled.objects.length, 1)
+  assert.equal(object.text, sourceText)
+  assert.equal(setTextRuns(styled, object.id, object.runs), styled, 'equivalent runs are a no-op')
+  assert.deepEqual(styled, before, 'adding or setting styles must not mutate the source scene')
+  const cleared = setTextRuns(styled, object.id, undefined)
+  if (cleared.objects[0].type !== 'text') assert.fail('Expected a text object')
+  assert.equal(cleared.objects[0].runs, undefined)
+
+  const recolored = setTextRuns(styled, object.id, [
+    { ...object.runs![0], color: '#ff8800' },
+    ...object.runs!.slice(1),
+  ])
+  const styleHistory = new DocumentHistory(styled)
+  assert.equal(styleHistory.recordChange(styled, recolored), true)
+  assert.equal(styleHistory.undo(recolored), styled)
+  assert.equal(styleHistory.redo(styled), recolored)
+
+  const invalidRuns = [
+    [{ start: -1, end: 1, color: '#000000' }],
+    [{ start: 0, end: sourceText.length + 1, color: '#000000' }],
+    [{ start: 3, end: 3, color: '#000000' }],
+    [
+      { start: 0, end: 4, color: '#000000' },
+      { start: 3, end: 5, color: '#ffffff' },
+    ],
+    [
+      { start: 7, end: 9, color: '#000000' },
+      { start: 0, end: 1, color: '#ffffff' },
+    ],
+    [{ start: emojiStart + 1, end: emojiStart + 2, color: '#000000' }],
+    [{ start: emojiStart, end: emojiStart + 1, color: '#000000' }],
+    [{ start: 0, end: 1, color: 'url(javascript:alert(1))' }],
+  ]
+  for (const runs of invalidRuns) {
+    assert.throws(() => setTextRuns(styled, object.id, runs), DocumentValidationError)
+  }
+  assert.throws(() => validateSceneDocument({
+    ...styled,
+    objects: [{
+      ...object,
+      runs: [
+        { start: 2, end: 6, color: '#bad' },
+        { start: 5, end: 7, color: '#fff' },
+      ],
+    }],
+  }), /overlap/)
+})
+
+test('changing text clears runs while history restores and replays the complete text state', () => {
+  const original = addTextObject(createSceneDocument(800, 600), {
+    x: 8,
+    y: 12,
+    text: 'print("Привет")',
+    runs: [{ start: 7, end: 15, color: '#cc0000' }],
+  })
+  const object = original.objects[0]
+  if (object.type !== 'text') assert.fail('Expected a text object')
+  const edited = updateTextObject(original, object.id, 'print("Hello")')
+  if (edited.objects[0].type !== 'text') assert.fail('Expected a text object')
+  assert.equal(edited.objects[0].runs, undefined)
+  assert.equal(updateTextObject(original, object.id, object.text), original, 'an unchanged draft keeps runs')
+
+  const history = new DocumentHistory(original)
+  assert.equal(history.recordChange(original, edited), true)
+  const undone = history.undo(edited)
+  assert.equal(undone, original)
+  if (!undone || undone.objects[0].type !== 'text') assert.fail('Expected styled text after Undo')
+  assert.deepEqual(undone.objects[0].runs, object.runs)
+  const redone = history.redo(undone)
+  assert.equal(redone, edited)
+  if (!redone || redone.objects[0].type !== 'text') assert.fail('Expected edited text after Redo')
+  assert.equal(redone.objects[0].runs, undefined)
+})
+
 test('moveObject and removeObject work with text while preserving document order and source snapshots', () => {
   const rectangleScene = addRectangle(createSceneDocument(800, 600), { x: 0, y: 0, width: 40, height: 30 })
   const scene = addTextObject(rectangleScene, { x: 50, y: 60, text: 'move me' })
@@ -118,6 +211,18 @@ test('old rectangle-only project manifests remain readable with their original s
 
   assert.equal(opened.document.objects.length, 1)
   assert.deepEqual(opened.document.objects[0], rectangleOnly.objects[0])
+})
+
+test('legacy TextObjects without runs still open as ordinary text objects', () => {
+  const legacy = addTextObject(createSceneDocument(640, 480), { x: 4, y: 5, text: 'plain text' })
+  const manifest = serializeProjectManifest(createProjectManifest('legacy-text', 'Legacy Text', legacy))
+  const opened = openProjectSession(manifest, null)
+
+  assert.equal(opened.document.objects.length, 1)
+  assert.equal(opened.document.objects[0].type, 'text')
+  if (opened.document.objects[0].type !== 'text') assert.fail('Expected a text object')
+  assert.equal(opened.document.objects[0].text, 'plain text')
+  assert.equal(opened.document.objects[0].runs, undefined)
 })
 
 test('New, create, edit, move, Undo/Redo, Save, and Open preserve text and object order', async () => {
