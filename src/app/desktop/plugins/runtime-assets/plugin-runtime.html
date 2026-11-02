@@ -13,8 +13,11 @@
       (() => {
         const handlers = new Map()
         const pending = new Map()
+        const maxFormSchemaBytes = 64 * 1024
+        const maxFormResponseBytes = 32 * 1024
         let requestSequence = 0
         let initialized = false
+        let capabilities = new Set()
         const send = (message) => parent.postMessage(message, '*')
         const messageError = (error) => error instanceof Error ? error.message : String(error)
         const reportError = (message) => send({ kind: 'runtime-error', message: String(message).slice(0, 500) })
@@ -24,15 +27,32 @@
 
         function makeCommandApi(invocationId) {
           const request = (method, args) => new Promise((resolve, reject) => {
+            if (method === 'show-form') {
+              let schemaBytes
+              try {
+                schemaBytes = new TextEncoder().encode(JSON.stringify(args[0])).byteLength
+              } catch {
+                reject(new Error('The plugin form schema must contain only JSON-compatible values.'))
+                return
+              }
+              if (schemaBytes > maxFormSchemaBytes) {
+                reject(new Error(`The plugin form schema exceeds ${maxFormSchemaBytes} bytes.`))
+                return
+              }
+            }
             const requestId = `${invocationId}:${++requestSequence}`
-            pending.set(requestId, { resolve, reject })
+            pending.set(requestId, { resolve, reject, method })
             send({ kind: 'request', invocationId, requestId, method, args })
           })
-          return Object.freeze({
+          const api = {
             snapshotDocument: () => request('snapshot-document', []),
             addObjects: (objects) => request('add-objects', [objects]),
             showError: (message) => request('show-error', [message]),
-          })
+          }
+          if (capabilities.has('ui.showForm')) {
+            api.ui = Object.freeze({ showForm: (schema) => request('show-form', [schema]) })
+          }
+          return Object.freeze(api)
         }
 
         async function loadPlugin(data) {
@@ -78,6 +98,7 @@
           const data = event.data
           if (!data || typeof data !== 'object') return
           if (data.kind === 'initialize' && typeof data.source === 'string' && Array.isArray(data.commandIds)) {
+            capabilities = new Set(Array.isArray(data.capabilities) ? data.capabilities.filter((item) => typeof item === 'string') : [])
             await loadPlugin(data)
             return
           }
@@ -85,8 +106,22 @@
             const entry = pending.get(data.requestId)
             if (!entry) return
             pending.delete(data.requestId)
-            if (data.success) entry.resolve(data.value)
-            else entry.reject(new Error(typeof data.message === 'string' ? data.message : 'The host rejected the plugin request.'))
+            if (data.success) {
+              if (entry.method === 'show-form') {
+                let responseBytes
+                try {
+                  responseBytes = new TextEncoder().encode(JSON.stringify(data.value)).byteLength
+                } catch {
+                  entry.reject(new Error('The plugin form response is invalid.'))
+                  return
+                }
+                if (responseBytes > maxFormResponseBytes) {
+                  entry.reject(new Error(`The plugin form response exceeds ${maxFormResponseBytes} bytes.`))
+                  return
+                }
+              }
+              entry.resolve(data.value)
+            } else entry.reject(new Error(typeof data.message === 'string' ? data.message : 'The host rejected the plugin request.'))
             return
           }
           if (data.kind === 'invoke' && typeof data.commandId === 'string' && typeof data.invocationId === 'string') {

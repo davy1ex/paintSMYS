@@ -4,6 +4,51 @@ export const PLUGIN_API_VERSION = 0
 export const MAX_PLUGIN_SOURCE_BYTES = 256 * 1024
 export const MAX_PLUGIN_MANIFEST_BYTES = 16 * 1024
 export const MAX_PLUGIN_BATCH_OBJECTS = 500
+export const MAX_PLUGIN_FORM_FIELDS = 16
+export const MAX_PLUGIN_FORM_OPTIONS = 32
+export const MAX_PLUGIN_FORM_SCHEMA_BYTES = 64 * 1024
+export const MAX_PLUGIN_FORM_RESPONSE_BYTES = 32 * 1024
+export const MAX_PLUGIN_FORM_TEXT_LENGTH = 1024
+export const MAX_PLUGIN_FORM_TEXTAREA_LENGTH = 16 * 1024
+
+export type PluginFormOption = { value: string; label: string }
+export type PluginTextFormField = {
+  id: string
+  type: 'text'
+  label: string
+  defaultValue?: string
+  required?: boolean
+}
+export type PluginTextareaFormField = {
+  id: string
+  type: 'textarea'
+  label: string
+  defaultValue?: string
+  required?: boolean
+}
+export type PluginSelectFormField = {
+  id: string
+  type: 'select'
+  label: string
+  defaultValue?: string
+  required?: boolean
+  options: PluginFormOption[]
+}
+export type PluginFormField = PluginTextFormField | PluginTextareaFormField | PluginSelectFormField
+export type PluginFormSchema = {
+  title: string
+  fields: PluginFormField[]
+  submitLabel?: string
+}
+export type PluginFormResult =
+  | { status: 'submitted'; values: Record<string, string> }
+  | { status: 'cancelled' }
+export type PluginFormPresentation = {
+  invocationId: string
+  requestId: string
+  sessionGeneration: number
+  schema: PluginFormSchema
+}
 
 export type PluginCommandManifest = {
   id: string
@@ -44,6 +89,9 @@ export type PluginCommandTransaction = {
 export type PluginHost = {
   beginCommand: (sessionToken: number) => PluginCommandTransaction
   showError: (message: string) => void
+  isSessionCurrent: (sessionToken: number) => boolean
+  presentForm: (form: PluginFormPresentation) => void
+  dismissForm: (requestId: string) => void
 }
 
 export type PluginLoadResult = {
@@ -54,6 +102,9 @@ export type PluginLoadResult = {
 export type PluginRuntime = {
   load: () => Promise<PluginLoadResult>
   invoke: (pluginId: string, commandId: string, sessionToken: number) => Promise<void>
+  submitForm: (requestId: string, values: unknown) => void
+  cancelForm: (requestId: string) => void
+  cancelPendingForm: (reason?: string) => void
   dispose: () => void
 }
 
@@ -68,6 +119,143 @@ export class PluginManifestError extends Error {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function serializedSize(value: unknown, label: string): number {
+  let serialized: string
+  try {
+    serialized = JSON.stringify(value)
+  } catch {
+    throw new Error(`${label} must contain only JSON-compatible values.`)
+  }
+  if (serialized === undefined) throw new Error(`${label} must contain only JSON-compatible values.`)
+  return new TextEncoder().encode(serialized).byteLength
+}
+
+function isShortText(value: unknown, maxLength: number): value is string {
+  return typeof value === 'string' && value.length <= maxLength && !/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/.test(value)
+}
+
+function validateFormField(value: unknown, index: number): PluginFormField {
+  if (!isRecord(value)) throw new Error(`Form field ${index + 1} must be an object.`)
+  const id = value.id
+  const label = value.label
+  if (typeof id !== 'string' || id.length > 64 || !/^[A-Za-z][A-Za-z0-9_-]*$/.test(id)) {
+    throw new Error(`Form field ${index + 1} has an invalid ID.`)
+  }
+  if (!isShortText(label, 80) || !label.trim()) throw new Error(`Form field "${id}" has an invalid label.`)
+  if (value.required !== undefined && typeof value.required !== 'boolean') {
+    throw new Error(`Form field "${id}" required must be a boolean.`)
+  }
+  if (value.defaultValue !== undefined && typeof value.defaultValue !== 'string') {
+    throw new Error(`Form field "${id}" defaultValue must be a string.`)
+  }
+
+  if (value.type === 'text' || value.type === 'textarea') {
+    if (!hasOnlyKeys(value, ['id', 'type', 'label', 'defaultValue', 'required'])) {
+      throw new Error(`Form field "${id}" contains an unknown property.`)
+    }
+    const maxLength = value.type === 'text' ? MAX_PLUGIN_FORM_TEXT_LENGTH : MAX_PLUGIN_FORM_TEXTAREA_LENGTH
+    if (value.defaultValue !== undefined && !isShortText(value.defaultValue, maxLength)) {
+      throw new Error(`Form field "${id}" has an invalid defaultValue.`)
+    }
+    return {
+      id,
+      type: value.type,
+      label,
+      ...(value.defaultValue === undefined ? {} : { defaultValue: value.defaultValue }),
+      ...(value.required === undefined ? {} : { required: value.required }),
+    }
+  }
+
+  if (value.type !== 'select') throw new Error(`Form field "${id}" has an unsupported field type.`)
+  if (!hasOnlyKeys(value, ['id', 'type', 'label', 'defaultValue', 'required', 'options'])) {
+    throw new Error(`Form field "${id}" contains an unknown property.`)
+  }
+  if (!Array.isArray(value.options) || value.options.length === 0 || value.options.length > MAX_PLUGIN_FORM_OPTIONS) {
+    throw new Error(`Select field "${id}" must have between 1 and ${MAX_PLUGIN_FORM_OPTIONS} options.`)
+  }
+  const optionValues = new Set<string>()
+  const options = value.options.map((option, optionIndex): PluginFormOption => {
+    if (!isRecord(option) || !hasOnlyKeys(option, ['value', 'label']) ||
+        !isShortText(option.value, 256) || !isShortText(option.label, 80) || !option.label.trim()) {
+      throw new Error(`Select field "${id}" option ${optionIndex + 1} is invalid.`)
+    }
+    if (optionValues.has(option.value)) throw new Error(`Select field "${id}" options must have unique values.`)
+    optionValues.add(option.value)
+    return { value: option.value, label: option.label }
+  })
+  if (value.defaultValue !== undefined && !optionValues.has(value.defaultValue as string)) {
+    throw new Error(`Select field "${id}" defaultValue must match one of its options.`)
+  }
+  return {
+    id,
+    type: 'select',
+    label,
+    options,
+    ...(value.defaultValue === undefined ? {} : { defaultValue: value.defaultValue as string }),
+    ...(value.required === undefined ? {} : { required: value.required }),
+  }
+}
+
+/** Validate and copy a plugin-provided form schema before it reaches the renderer. */
+export function validatePluginFormSchema(value: unknown): PluginFormSchema {
+  if (serializedSize(value, 'The plugin form schema') > MAX_PLUGIN_FORM_SCHEMA_BYTES) {
+    throw new Error(`The plugin form schema exceeds ${MAX_PLUGIN_FORM_SCHEMA_BYTES} bytes.`)
+  }
+  if (!isRecord(value) || !hasOnlyKeys(value, ['title', 'fields', 'submitLabel'])) {
+    throw new Error('The plugin form schema must contain only title, fields, and submitLabel.')
+  }
+  if (!isShortText(value.title, 80) || !value.title.trim()) throw new Error('The plugin form title is invalid.')
+  if (value.submitLabel !== undefined && (!isShortText(value.submitLabel, 32) || !value.submitLabel.trim())) {
+    throw new Error('The plugin form submitLabel is invalid.')
+  }
+  if (!Array.isArray(value.fields) || value.fields.length === 0 || value.fields.length > MAX_PLUGIN_FORM_FIELDS) {
+    throw new Error(`A plugin form must have between 1 and ${MAX_PLUGIN_FORM_FIELDS} fields.`)
+  }
+  const ids = new Set<string>()
+  const fields = value.fields.map((field, index) => {
+    const validated = validateFormField(field, index)
+    if (ids.has(validated.id)) throw new Error(`Form field ID "${validated.id}" is duplicated.`)
+    ids.add(validated.id)
+    return validated
+  })
+  return {
+    title: value.title,
+    fields,
+    ...(value.submitLabel === undefined ? {} : { submitLabel: value.submitLabel }),
+  }
+}
+
+/** Validate values coming back from the host-rendered dialog and bound their bridge payload. */
+export function validatePluginFormValues(schema: PluginFormSchema, value: unknown): Record<string, string> {
+  if (!isRecord(value) || !hasOnlyKeys(value, schema.fields.map(({ id }) => id))) {
+    throw new Error('The submitted plugin form values do not match the form fields.')
+  }
+  const values: Record<string, string> = {}
+  for (const field of schema.fields) {
+    const submitted = value[field.id]
+    const maxLength = field.type === 'textarea' ? MAX_PLUGIN_FORM_TEXTAREA_LENGTH : MAX_PLUGIN_FORM_TEXT_LENGTH
+    if (typeof submitted !== 'string' || !isShortText(submitted, maxLength)) {
+      throw new Error(`The submitted value for "${field.label}" is invalid or too long.`)
+    }
+    if (field.required && !submitted.trim()) throw new Error(`"${field.label}" is required.`)
+    if (field.type === 'select' && !field.options.some(({ value: optionValue }) => optionValue === submitted)) {
+      throw new Error(`The submitted value for "${field.label}" is not one of its options.`)
+    }
+    values[field.id] = submitted
+  }
+  if (serializedSize({ status: 'submitted', values }, 'The plugin form response') > MAX_PLUGIN_FORM_RESPONSE_BYTES) {
+    throw new Error(`The plugin form response exceeds ${MAX_PLUGIN_FORM_RESPONSE_BYTES} bytes.`)
+  }
+  return values
+}
+
+export function createPluginFormDefaults(schema: PluginFormSchema): Record<string, string> {
+  return Object.fromEntries(schema.fields.map((field) => [
+    field.id,
+    field.defaultValue ?? (field.type === 'select' ? field.options[0].value : ''),
+  ]))
 }
 
 function hasOnlyKeys(value: Record<string, unknown>, keys: string[]): boolean {

@@ -71,7 +71,7 @@ function EditorMenuBar({
       }
     }
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape') return
+      if (event.key !== 'Escape' || document.querySelector('dialog[open]')) return
       event.preventDefault()
       setFileMenuOpen(false)
       setEditMenuOpen(false)

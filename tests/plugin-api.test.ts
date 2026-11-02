@@ -9,6 +9,15 @@ import {
   parsePluginManifest,
   parsePluginManifestText,
   getPluginMenuEmptyMessage,
+  createPluginFormDefaults,
+  MAX_PLUGIN_FORM_FIELDS,
+  MAX_PLUGIN_FORM_OPTIONS,
+  MAX_PLUGIN_FORM_RESPONSE_BYTES,
+  MAX_PLUGIN_FORM_SCHEMA_BYTES,
+  MAX_PLUGIN_FORM_TEXTAREA_LENGTH,
+  MAX_PLUGIN_FORM_TEXT_LENGTH,
+  validatePluginFormSchema,
+  validatePluginFormValues,
   validateRegisteredPluginCommands,
   type PluginManifest,
 } from '../src/application/plugins/plugin-api'
@@ -25,6 +34,16 @@ const validManifest: PluginManifest = {
   entry: 'index.js',
   commands: [{ id: 'make-shapes', name: 'Make Shapes' }],
 }
+
+const validFormSchema = {
+  title: 'Generate Window',
+  fields: [
+    { id: 'title', type: 'text', label: 'Title', defaultValue: 'Program Manager', required: true },
+    { id: 'message', type: 'textarea', label: 'Message', defaultValue: 'Welcome' },
+    { id: 'style', type: 'select', label: 'Style', options: [{ value: 'classic', label: 'Classic' }, { value: 'dark', label: 'Dark' }], defaultValue: 'classic' },
+  ],
+  submitLabel: 'Generate',
+} as const
 
 function rectangle(x = 10) {
   return { type: 'rectangle', x, y: 20, width: 80, height: 40, fill: '#c0c0c0', stroke: '#000000', strokeWidth: 1 }
@@ -50,6 +69,53 @@ test('the Plugins menu has a clear empty state with and without plugin load erro
   assert.equal(getPluginMenuEmptyMessage(0, 0), 'No plugins installed')
   assert.equal(getPluginMenuEmptyMessage(0, 1), 'No plugin commands available')
   assert.equal(getPluginMenuEmptyMessage(1, 0), null)
+})
+
+test('plugin form schemas validate and produce string defaults for all supported field types', () => {
+  const schema = validatePluginFormSchema(validFormSchema)
+  assert.deepEqual(schema, validFormSchema)
+  assert.deepEqual(createPluginFormDefaults(schema), { title: 'Program Manager', message: 'Welcome', style: 'classic' })
+  assert.deepEqual(validatePluginFormValues(schema, { title: 'Desktop', message: '', style: 'dark' }), {
+    title: 'Desktop', message: '', style: 'dark',
+  })
+})
+
+test('plugin form schemas reject unknown types, properties, and duplicate field IDs', () => {
+  assert.throws(() => validatePluginFormSchema({ ...validFormSchema, fields: [{ id: 'x', type: 'date', label: 'Date' }] }), /unsupported field type/)
+  assert.throws(() => validatePluginFormSchema({ ...validFormSchema, custom: true }), /only title, fields, and submitLabel/)
+  assert.throws(() => validatePluginFormSchema({ ...validFormSchema, fields: [validFormSchema.fields[0], { ...validFormSchema.fields[0] }] }), /duplicated/)
+  assert.throws(() => validatePluginFormSchema({ ...validFormSchema, fields: [{ ...validFormSchema.fields[0], html: '<b>Title</b>' }] }), /unknown property/)
+})
+
+test('plugin select fields reject duplicate options and defaults outside the static option list', () => {
+  const select = { id: 'style', type: 'select', label: 'Style', options: [{ value: 'a', label: 'A' }, { value: 'a', label: 'Again' }] }
+  assert.throws(() => validatePluginFormSchema({ title: 'Style', fields: [select] }), /unique values/)
+  assert.throws(() => validatePluginFormSchema({ title: 'Style', fields: [{ ...select, options: [{ value: 'a', label: 'A' }], defaultValue: 'b' }] }), /match one of its options/)
+  assert.throws(() => validatePluginFormSchema({ title: 'Style', fields: [{ ...select, options: [{ value: 'a', label: '' }] }]}), /option 1 is invalid/)
+})
+
+test('plugin form schema and field limits are enforced', () => {
+  assert.throws(() => validatePluginFormSchema({ title: 'Too many', fields: Array.from({ length: MAX_PLUGIN_FORM_FIELDS + 1 }, (_, index) => ({ id: `f${index}`, type: 'text', label: `Field ${index}` })) }), /between 1 and/)
+  assert.throws(() => validatePluginFormSchema({ title: 'Too many options', fields: [{ id: 's', type: 'select', label: 'Select', options: Array.from({ length: MAX_PLUGIN_FORM_OPTIONS + 1 }, (_, index) => ({ value: String(index), label: String(index) })) }] }), /between 1 and/)
+  assert.throws(() => validatePluginFormSchema({ title: 'Large', fields: [{ id: 'text', type: 'text', label: 'Text', defaultValue: 'x'.repeat(MAX_PLUGIN_FORM_TEXT_LENGTH + 1) }] }), /invalid defaultValue/)
+  assert.throws(() => validatePluginFormSchema({ title: 'Large', fields: [{ id: 'area', type: 'textarea', label: 'Text', defaultValue: 'x'.repeat(MAX_PLUGIN_FORM_TEXTAREA_LENGTH + 1) }] }), /invalid defaultValue/)
+  assert.throws(() => validatePluginFormSchema({ title: 'Large', fields: [{ id: 'area', type: 'textarea', label: 'Text', defaultValue: 'x'.repeat(MAX_PLUGIN_FORM_SCHEMA_BYTES) }] }), /schema exceeds/)
+})
+
+test('plugin form submissions enforce required values, types, lengths, options, and the response byte limit', () => {
+  const schema = validatePluginFormSchema(validFormSchema)
+  assert.throws(() => validatePluginFormValues(schema, { title: '  ', message: '', style: 'classic' }), /is required/)
+  assert.throws(() => validatePluginFormValues(schema, { title: 4, message: '', style: 'classic' }), /invalid or too long/)
+  assert.throws(() => validatePluginFormValues(schema, { title: 'Title', message: '', style: 'other' }), /not one of its options/)
+  assert.throws(() => validatePluginFormValues(schema, { title: 'Title', message: '', style: 'classic', extra: '' }), /do not match/)
+  assert.throws(() => validatePluginFormValues(schema, { title: 'x'.repeat(MAX_PLUGIN_FORM_TEXT_LENGTH + 1), message: '', style: 'classic' }), /invalid or too long/)
+
+  const responseSchema = validatePluginFormSchema({
+    title: 'Large response',
+    fields: [1, 2, 3].map((index) => ({ id: `area${index}`, type: 'textarea', label: `Area ${index}` })),
+  })
+  const largeValues = Object.fromEntries(responseSchema.fields.map(({ id }) => [id, 'x'.repeat(MAX_PLUGIN_FORM_RESPONSE_BYTES / 3 + 32)]))
+  assert.throws(() => validatePluginFormValues(responseSchema, largeValues), /response exceeds/)
 })
 
 test('plugin batches receive unique IDs and invalid batches leave the staged document unchanged', () => {

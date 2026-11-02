@@ -1,6 +1,6 @@
 # paintSMYS Plugin API v0
 
-Plugin API v0 supports local Desktop action plugins. A plugin contributes one or more named menu commands and can read a document snapshot, stage standard scene objects, and report a user-facing error. It cannot define tools, Inspector fields, or custom UI.
+Plugin API v0 supports local Desktop action plugins. A plugin contributes one or more named menu commands and can read a document snapshot, stage standard scene objects, report a user-facing error, and optionally request a host-rendered static form. Forms are experimental. Plugins cannot define tools, Inspector fields, HTML, CSS, React components, or custom validation code.
 
 ## Install a local plugin
 
@@ -71,8 +71,70 @@ globalThis.paintSMYSPlugin = {
 - `snapshotDocument(): Promise<SceneDocument>` — returns a read-only-by-copy snapshot of the staged document.
 - `addObjects(objects): Promise<void>` — accepts an array of standard Rectangle and Text object data, without IDs. Core assigns fresh IDs and validates the full result. A command may stage up to 500 objects total.
 - `showError(message): Promise<void>` — displays a short message in the editor status area.
+- `ui.showForm(schema): Promise<FormResult>` — optional capability that opens a native paintSMYS Win95-style dialog. Check that `host.ui?.showForm` is a function before using it, so the command can continue to run on a host without form support.
 
 All `addObjects` calls from one command are staged in memory. If the command succeeds, the host validates and publishes the final document once, making one History entry. If a batch fails or the command throws, staged changes are discarded. A project switch or document edit while the command is running also cancels its commit, so an old result cannot overwrite a new session or a newer document.
+
+## Experimental host forms
+
+`showForm` accepts a JSON-only schema. The Host validates and copies the schema before showing anything; the plugin cannot provide markup, styles, callbacks, or validation expressions. The currently supported schema is:
+
+```js
+const result = await host.ui.showForm({
+  title: 'Generate Win95 Window',
+  fields: [
+    {
+      id: 'windowTitle',
+      type: 'text',
+      label: 'Window title',
+      defaultValue: 'Program Manager',
+      required: true,
+    },
+    {
+      id: 'welcomeMessage',
+      type: 'text',
+      label: 'Welcome message',
+      defaultValue: 'Welcome to Windows 95',
+    },
+    {
+      id: 'style',
+      type: 'select',
+      label: 'Style',
+      options: [
+        { value: 'classic', label: 'Classic' },
+        { value: 'dark', label: 'Dark' },
+      ],
+      defaultValue: 'classic',
+    },
+  ],
+  submitLabel: 'Generate',
+})
+
+if (result.status === 'cancelled') return
+const title = result.values.windowTitle
+```
+
+The only field types are `text`, `textarea`, and `select`. Every field needs a unique `id` (an ASCII letter followed by ASCII letters, digits, `_`, or `-`) and a `label`. `required` is optional and defaults to false; required string values cannot be empty or whitespace only. `defaultValue` is an optional string and follows the same length limit as its field value; for a select it must match one of that field's option values. Select options are static `{ value, label }` string pairs with unique values. When no default is supplied, text fields start empty and a select starts at its first option. `submitLabel` is optional and defaults to `OK`.
+
+The current limits are:
+
+| Item | Limit |
+| --- | ---: |
+| Fields per form | 1–16 |
+| Options per select | 1–32 |
+| `title` | 80 characters |
+| Field `id` | 64 characters |
+| Field `label` | 80 characters |
+| Select option value / label | 256 / 80 characters |
+| `submitLabel` | 32 characters |
+| `text` value | 1,024 characters |
+| `textarea` value | 16,384 characters |
+| Serialized schema | 64 KiB |
+| Serialized submitted response | 32 KiB |
+
+Unknown properties, duplicate IDs or option values, unsupported types, invalid defaults, invalid select choices, missing or invalid required values, and values outside these limits are rejected. Rejections are Promise errors; they are not converted to Cancel. The result is either `{ status: 'submitted', values: Record<string, string> }` or `{ status: 'cancelled' }`. Escape and Cancel return the latter. Cancellation rolls back all staged changes for that invocation and prevents it from committing, including if plugin code ignores the returned status. A failed command also dismisses the form and rolls back its staged changes.
+
+Only one form may be open across the runtime. Nested and parallel forms are rejected. Waiting for user input is limited to five minutes and does not count toward the command's 60-second execution budget; execution time resumes after Submit. A form timeout dismisses the dialog, rejects the command, and rolls back its changes.
 
 ## Runtime and trust boundary
 
@@ -80,7 +142,7 @@ Electron Main reads and validates package files under `<app.getPath('userData')>
 
 This is a minimal runtime for explicitly installed, locally trusted development plugins, not a security boundary for hostile JavaScript. A plugin can consume CPU or memory and may exploit browser or Electron vulnerabilities; CSP and iframe sandbox behavior also depend on the installed runtime. Only install code you trust. paintSMYS does not download or install plugins automatically.
 
-The API version is deliberately small. It does not promise compatibility beyond the declared version and does not expose save, file, network, asset, tool, Inspector, or UI capabilities.
+The manifest API version remains `0`: `ui.showForm` is an optional capability, and old manifests and plugins continue to work without it. The API is experimental and does not expose save, file, network, asset, tool, Inspector, or plugin-defined UI capabilities.
 
 ## Example
 

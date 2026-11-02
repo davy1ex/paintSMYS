@@ -125,6 +125,52 @@ h1 { margin: 0; color: #181818; font-size: 22px; font-weight: 700; }
 .close-project-dialog__button { min-width: 82px; min-height: 28px; padding: 3px 10px; }
 .close-project-dialog__button:disabled { color: #777; cursor: wait; }
 
+.plugin-form-dialog {
+  width: min(480px, calc(100vw - 32px));
+  max-height: min(90vh, 720px);
+  padding: 0;
+  overflow: auto;
+  border: 2px solid;
+  border-color: #fff #404040 #404040 #fff;
+  border-radius: 0;
+  background: #c0c0c0;
+  color: #181818;
+  box-shadow: 2px 2px 0 #000;
+}
+.plugin-form-dialog::backdrop { background: rgb(0 0 0 / 28%); }
+.plugin-form-dialog__titlebar {
+  min-height: 28px;
+  padding: 6px 8px;
+  background: #000080;
+  color: #fff;
+  font-weight: 700;
+}
+.plugin-form-dialog__body { display: grid; gap: 14px; padding: 16px; }
+.plugin-form-dialog__fields { display: grid; gap: 12px; }
+.plugin-form-dialog__field { display: grid; gap: 5px; min-width: 0; font-weight: 700; }
+.plugin-form-dialog__field input,
+.plugin-form-dialog__field textarea,
+.plugin-form-dialog__field select {
+  width: 100%;
+  min-width: 0;
+  padding: 5px 6px;
+  border: 2px solid;
+  border-color: #404040 #fff #fff #404040;
+  border-radius: 0;
+  background: #fff;
+  color: #111;
+  font: inherit;
+  font-weight: 400;
+}
+.plugin-form-dialog__field textarea { resize: vertical; }
+.plugin-form-dialog__field input:focus-visible,
+.plugin-form-dialog__field textarea:focus-visible,
+.plugin-form-dialog__field select:focus-visible { outline: 1px dotted #000080; outline-offset: 1px; }
+.plugin-form-dialog__error { padding: 7px; border: 1px solid #a33; background: #fff; color: #821919; }
+.plugin-form-dialog__actions { display: flex; justify-content: flex-end; gap: 8px; }
+.plugin-form-dialog__button { min-width: 82px; min-height: 28px; padding: 3px 10px; }
+.plugin-form-dialog__button:disabled { color: #777; cursor: not-allowed; }
+
 @media (max-width: 600px) {
   .startup-window { min-height: 100vh; }
   .welcome-screen, .new-project-screen { padding: 28px 16px 20px; }

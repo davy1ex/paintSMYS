@@ -434,7 +434,7 @@ const EditorWorkspace = forwardRef<EditorWorkspaceHandle, EditorWorkspaceProps>(
 
   useEffect(() => {
     const cancelGesture = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape') return
+      if (event.key !== 'Escape' || globalThis.document.querySelector('dialog[open]')) return
       const gesture = gestureRef.current
       if (!gesture) return
       event.preventDefault()

@@ -14,6 +14,7 @@
     "src/application/**/*.ts",
     "src/core/**/*.ts",
     "src/app/desktop/window/close-handshake.ts",
+    "src/app/desktop/plugins/isolated-plugin-runtime.ts",
     "src/app/desktop/project-storage.ts",
     "src/app/desktop/plugin-loader.ts",
     "src/app/desktop/png-export.ts",

@@ -8,10 +8,11 @@ import type { ProjectSaveMode, ProjectSavePort } from '../application/project-sa
 import type { SaveProjectSessionResult } from '../application/save-project-session'
 import type { SceneDocument } from '../core/document/scene-document'
 import { createPluginCommandTransaction } from '../application/plugins/plugin-command-transaction'
-import type { PluginMenuCommand, PluginRuntime, PluginRuntimeFactory } from '../application/plugins/plugin-api'
+import type { PluginFormPresentation, PluginMenuCommand, PluginRuntime, PluginRuntimeFactory } from '../application/plugins/plugin-api'
 import { mergeSavedProjectSession, saveProjectSession } from '../application/save-project-session'
 import EditorWorkspace, { type EditorWorkspaceHandle } from '../editor/workspace/EditorWorkspace'
 import CloseProjectDialog, { type ClosePrompt } from './CloseProjectDialog'
+import PluginFormDialog from './PluginFormDialog'
 import NewProjectScreen from './screens/NewProjectScreen'
 import WelcomeScreen from './screens/WelcomeScreen'
 import './app.css'
@@ -33,6 +34,7 @@ function App({ projectAdapter, pluginRuntimeFactory }: AppProps) {
   const [pluginCommands, setPluginCommands] = useState<PluginMenuCommand[]>([])
   const [pluginErrors, setPluginErrors] = useState<string[]>([])
   const [isRunningPluginCommand, setIsRunningPluginCommand] = useState(false)
+  const [pluginFormRequest, setPluginFormRequest] = useState<PluginFormPresentation | null>(null)
   const [closePrompt, setClosePrompt] = useState<ClosePrompt | null>(null)
   const sessionRef = useRef<ProjectSession | null>(null)
   const editorWorkspaceRef = useRef<EditorWorkspaceHandle>(null)
@@ -42,14 +44,58 @@ function App({ projectAdapter, pluginRuntimeFactory }: AppProps) {
   const savingRef = useRef(false)
   const exportingRef = useRef(false)
   const closePromptRef = useRef<ClosePrompt | null>(null)
+  const pluginFormRequestRef = useRef<PluginFormPresentation | null>(null)
+  const pendingCloseRequestRef = useRef<number | null>(null)
 
   function updateClosePrompt(nextPrompt: ClosePrompt | null) {
     closePromptRef.current = nextPrompt
     setClosePrompt(nextPrompt)
   }
 
+  function presentPluginForm(request: PluginFormPresentation) {
+    pluginFormRequestRef.current = request
+    setPluginFormRequest(request)
+  }
+
+  function dismissPluginForm(requestId: string) {
+    if (pluginFormRequestRef.current?.requestId !== requestId) return
+    pluginFormRequestRef.current = null
+    setPluginFormRequest(null)
+  }
+
+  function handleCloseRequestAfterPluginForm(requestId: number) {
+    const controls = window.paintSMYS?.windowControls
+    if (!controls) return
+    if (editorWorkspaceRef.current && !editorWorkspaceRef.current.commitPendingEdits()) {
+      setError('Fix or cancel the invalid Inspector value before closing.')
+      controls.respondToCloseRequest(requestId, 'cancel')
+      return
+    }
+    if (closePromptRef.current) {
+      if (closePromptRef.current.requestId !== requestId) controls.respondToCloseRequest(requestId, 'cancel')
+      return
+    }
+    if (!requiresCloseConfirmation(sessionRef.current)) {
+      controls.respondToCloseRequest(requestId, 'allow')
+      return
+    }
+    updateClosePrompt({ requestId, message: '' })
+  }
+
+  function handleCloseRequest(requestId: number) {
+    const activeForm = pluginFormRequestRef.current
+    if (!activeForm) {
+      handleCloseRequestAfterPluginForm(requestId)
+      return
+    }
+    pendingCloseRequestRef.current = requestId
+    pluginRuntimeRef.current?.cancelPendingForm()
+    if (pluginFormRequestRef.current) dismissPluginForm(activeForm.requestId)
+  }
+
   function setActiveSession(nextSession: ProjectSession, resetEditorState = false) {
     if (resetEditorState) {
+      pluginRuntimeRef.current?.cancelPendingForm()
       sessionGenerationRef.current += 1
       setEditorSessionVersion((version) => version + 1)
       historyRef.current = new DocumentHistory(nextSession.isDirty ? null : nextSession.document)
@@ -66,23 +112,9 @@ function App({ projectAdapter, pluginRuntimeFactory }: AppProps) {
     const controls = window.paintSMYS?.windowControls
     if (!controls) return
 
-    const unsubscribeRequest = controls.onCloseRequest((requestId) => {
-      if (editorWorkspaceRef.current && !editorWorkspaceRef.current.commitPendingEdits()) {
-        setError('Fix or cancel the invalid Inspector value before closing.')
-        controls.respondToCloseRequest(requestId, 'cancel')
-        return
-      }
-      if (closePromptRef.current) {
-        if (closePromptRef.current.requestId !== requestId) controls.respondToCloseRequest(requestId, 'cancel')
-        return
-      }
-      if (!requiresCloseConfirmation(sessionRef.current)) {
-        controls.respondToCloseRequest(requestId, 'allow')
-        return
-      }
-      updateClosePrompt({ requestId, message: '' })
-    })
+    const unsubscribeRequest = controls.onCloseRequest(handleCloseRequest)
     const unsubscribeFailure = controls.onCloseRequestFailure(({ requestId, message }) => {
+      if (pendingCloseRequestRef.current === requestId) pendingCloseRequestRef.current = null
       if (closePromptRef.current?.requestId === requestId) updateClosePrompt(null)
       setError(message)
     })
@@ -92,6 +124,14 @@ function App({ projectAdapter, pluginRuntimeFactory }: AppProps) {
       unsubscribeFailure()
     }
   }, [])
+
+  useEffect(() => {
+    if (pluginFormRequest !== null) return
+    const requestId = pendingCloseRequestRef.current
+    if (requestId === null) return
+    pendingCloseRequestRef.current = null
+    handleCloseRequestAfterPluginForm(requestId)
+  }, [pluginFormRequest])
 
   useEffect(() => {
     if (window.paintSMYS) return
@@ -115,6 +155,9 @@ function App({ projectAdapter, pluginRuntimeFactory }: AppProps) {
     const runtime = pluginRuntimeFactory({
       beginCommand: (sessionToken) => beginPluginCommand(sessionToken),
       showError: (message) => setError(message),
+      isSessionCurrent: (sessionToken) => sessionGenerationRef.current === sessionToken,
+      presentForm: (request) => presentPluginForm(request),
+      dismissForm: (requestId) => dismissPluginForm(requestId),
     })
     pluginRuntimeRef.current = runtime
     void runtime.load().then((result) => {
@@ -367,6 +410,17 @@ function App({ projectAdapter, pluginRuntimeFactory }: AppProps) {
           pluginErrors={pluginErrors}
           isRunningPluginCommand={isRunningPluginCommand}
           onPluginCommand={(command) => void runPluginCommand(command)}
+        />
+        <PluginFormDialog
+          request={pluginFormRequest}
+          onSubmit={(requestId, values) => {
+            try {
+              pluginRuntimeRef.current?.submitForm(requestId, values)
+            } catch (formError) {
+              setError(formError instanceof Error ? formError.message : 'The plugin form could not be submitted.')
+            }
+          }}
+          onCancel={(requestId) => pluginRuntimeRef.current?.cancelForm(requestId)}
         />
         <CloseProjectDialog
           request={closePrompt}
