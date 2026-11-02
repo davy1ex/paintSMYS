@@ -2,7 +2,10 @@ import { useEffect, useRef, useState } from 'react'
 import type { ProjectSession } from '../../application/project-session'
 import type { ProjectSaveMode } from '../../application/project-save-port'
 import EditorMenuBar from './EditorMenuBar'
+import ToolPanel from './ToolPanel'
 import './editor-workspace.css'
+
+type ActiveTool = 'select' | 'rectangle'
 
 type EditorWorkspaceProps = {
   session: ProjectSession
@@ -17,6 +20,7 @@ function EditorWorkspace({ session, canSave, isSaving, statusMessage, onSave, on
   const canvasRef = useRef<HTMLDivElement>(null)
   const [viewportSize, setViewportSize] = useState({ width: 0, height: 0 })
   const [mockActionMessage, setMockActionMessage] = useState('')
+  const [activeTool, setActiveTool] = useState<ActiveTool>('select')
   const { document } = session
   const { artboard } = document
   const fitScale = Math.min(
@@ -66,6 +70,7 @@ function EditorWorkspace({ session, canSave, isSaving, statusMessage, onSave, on
         <span className="editor-dimensions">{artboard.width} × {artboard.height} px</span>
       </div>
       <div className="editor-main">
+        <ToolPanel activeTool={activeTool} onToolChange={setActiveTool} />
         <section className="editor-stage" aria-label="Artboard workspace">
           <div className="editor-canvas-wrap" ref={canvasRef}>
             <div

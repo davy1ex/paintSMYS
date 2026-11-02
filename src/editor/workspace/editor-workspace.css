@@ -25,6 +25,13 @@
 .editor-toolbar-spacer { flex: 1; }
 .editor-dimensions { padding: 5px 8px; border: 1px solid; border-color: #808080 #fff #fff #808080; background: #bdbdbd; font-variant-numeric: tabular-nums; }
 .editor-main { display: flex; min-height: 0; flex: 1; }
+.tool-panel { width: 72px; flex: 0 0 72px; padding: 7px 6px; border-right: 2px solid; border-color: #fff #404040 #404040 #fff; background: #c0c0c0; }
+.tool-panel__grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 4px; }
+.tool-panel__button { display: grid; width: 27px; aspect-ratio: 1; padding: 3px; border: 1px solid; border-color: #fff #404040 #404040 #fff; background: #c0c0c0; color: #111; place-items: center; cursor: default; }
+.tool-panel__button:hover { background: #d0d0d0; }
+.tool-panel__button[aria-pressed="true"] { border-color: #404040 #fff #fff #404040; padding: 4px 2px 2px 4px; background: #b8b8b8; }
+.tool-panel__button:focus-visible { outline: 1px dotted #111; outline-offset: -4px; }
+.tool-panel__button svg { display: block; width: 18px; height: 18px; }
 .editor-stage { position: relative; display: flex; min-width: 0; flex: 1; flex-direction: column; padding: 16px 16px 22px; background: #808080; }
 .editor-canvas-wrap { display: grid; min-width: 0; min-height: 0; flex: 1; overflow: hidden; place-items: center; background-color: #a0a0a0; background-image: linear-gradient(45deg, #aaa 25%, transparent 25%), linear-gradient(-45deg, #aaa 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #aaa 75%), linear-gradient(-45deg, transparent 75%, #aaa 75%); background-position: 0 0, 0 5px, 5px -5px, -5px 0; background-size: 10px 10px; }
 .editor-artboard { flex: none; overflow: hidden; background: #fff; box-shadow: 1px 1px 0 #333, 2px 2px 0 #ddd; }
