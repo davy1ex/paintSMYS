@@ -79,3 +79,12 @@ test('rectangle hit testing returns the topmost overlapping object and ignores e
   assert.equal(findTopmostRectangleAtPoint(scene.objects, { x: 100, y: 100 }), null)
 })
 
+test('rectangle hit testing can include a small grab margin and still prefer the topmost object', () => {
+  const underlying = addRectangle(createSceneDocument(800, 600), { x: 90, y: 90, width: 40, height: 40 })
+  const scene = addRectangle(underlying, { x: 110, y: 100, width: 2, height: 30 })
+  const pointBesideThinRectangle = { x: 106, y: 115 }
+
+  assert.equal(findTopmostRectangleAtPoint(scene.objects, pointBesideThinRectangle), underlying.objects[0].id)
+  assert.equal(findTopmostRectangleAtPoint(scene.objects, pointBesideThinRectangle, { x: 5, y: 5 }), scene.objects[1].id)
+})
+

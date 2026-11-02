@@ -48,6 +48,8 @@ type RectangleMoveGesture = GestureBase & {
 
 type RectangleGesture = RectangleDrawGesture | RectangleMoveGesture
 
+const RECTANGLE_HIT_SLOP_CSS_PIXELS = 8
+
 function pointerToArtboard(svg: SVGSVGElement, point: Point): Point | null {
   const screenTransform = svg.getScreenCTM()
   if (!screenTransform) return null
@@ -68,8 +70,17 @@ function findObjectAtClientPoint(svg: SVGSVGElement | null, objects: SceneObject
     clientPoint.y < bounds.top || clientPoint.y > bounds.bottom
   ) return null
 
-  const scenePoint = pointerToArtboard(svg, clientPoint)
-  return scenePoint ? findTopmostRectangleAtPoint(objects, scenePoint) : null
+  const screenTransform = svg.getScreenCTM()
+  if (!screenTransform) return null
+  const inverse = screenTransform.inverse()
+  const scenePoint = transformPoint(clientPoint, inverse)
+  const horizontalSlop = transformVector({ x: RECTANGLE_HIT_SLOP_CSS_PIXELS, y: 0 }, inverse)
+  const verticalSlop = transformVector({ x: 0, y: RECTANGLE_HIT_SLOP_CSS_PIXELS }, inverse)
+  const tolerance = {
+    x: Math.abs(horizontalSlop.x) + Math.abs(verticalSlop.x),
+    y: Math.abs(horizontalSlop.y) + Math.abs(verticalSlop.y),
+  }
+  return findTopmostRectangleAtPoint(objects, scenePoint, tolerance)
 }
 
 function isEditableTarget(target: EventTarget | null): boolean {

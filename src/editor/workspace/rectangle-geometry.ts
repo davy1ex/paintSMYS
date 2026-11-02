@@ -50,12 +50,16 @@ export function isGestureLongEnough(start: Point, end: Point, minimumCssPixels =
   return Math.hypot(end.x - start.x, end.y - start.y) >= minimumCssPixels
 }
 
-export function findTopmostRectangleAtPoint(objects: SceneObject[], point: Point): string | null {
+export function findTopmostRectangleAtPoint(
+  objects: SceneObject[],
+  point: Point,
+  tolerance: Point = { x: 0, y: 0 },
+): string | null {
   for (let index = objects.length - 1; index >= 0; index -= 1) {
     const object = objects[index]
     if (
-      point.x >= object.x && point.x <= object.x + object.width &&
-      point.y >= object.y && point.y <= object.y + object.height
+      point.x >= object.x - tolerance.x && point.x <= object.x + object.width + tolerance.x &&
+      point.y >= object.y - tolerance.y && point.y <= object.y + object.height + tolerance.y
     ) return object.id
   }
 
