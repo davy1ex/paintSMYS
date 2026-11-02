@@ -1,11 +1,15 @@
 import { app, BrowserWindow, dialog, ipcMain, type WebContents } from 'electron'
-import { realpath } from 'node:fs/promises'
+import { realpath, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
+import type { PngExportRequest } from '../../application/export-png-port'
 import { inspectSaveAsTarget, readProjectFolder, saveExistingProjectFolder, saveProjectAsFolder } from './project-storage'
+import { exportPngFile } from './png-export'
 import { CloseHandshake } from './window/close-handshake'
 
 const projectRoots = new WeakMap<WebContents, string>()
 const closeHandshakes = new WeakMap<BrowserWindow, CloseHandshake>()
+const pngExportDialogs = new WeakSet<BrowserWindow>()
+const closeAfterPngExportDialog = new WeakSet<BrowserWindow>()
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : 'The project operation failed.'
@@ -59,6 +63,11 @@ function createWindow(): void {
   closeHandshakes.set(window, closeHandshake)
 
   window.on('close', (event) => {
+    if (pngExportDialogs.has(window)) {
+      event.preventDefault()
+      closeAfterPngExportDialog.add(window)
+      return
+    }
     if (!closeHandshake.handleClose()) event.preventDefault()
   })
   window.on('maximize', sendMaximizedState)
@@ -184,6 +193,39 @@ ipcMain.handle('paintSMYS:save-project', async (event, request: unknown) => {
   } catch (error) {
     return { status: 'error', message: errorMessage(error) }
   }
+})
+
+ipcMain.handle('paintSMYS:export-png', async (event, request: unknown) => {
+  const owner = BrowserWindow.fromWebContents(event.sender)
+  if (!owner) return { status: 'error', message: 'The application window is unavailable.' }
+  if (typeof request !== 'object' || request === null || !('projectName' in request) || !('pngBytes' in request)) {
+    return { status: 'error', message: 'The PNG export request is invalid.' }
+  }
+
+  const payload = request as PngExportRequest
+  if (typeof payload.projectName !== 'string' || payload.projectName.length > 256) {
+    return { status: 'error', message: 'The PNG export request is invalid.' }
+  }
+  return exportPngFile(
+    payload,
+    async (defaultName) => {
+      pngExportDialogs.add(owner)
+      try {
+        const selection = await dialog.showSaveDialog(owner, {
+          title: 'Export Artboard as PNG',
+          buttonLabel: 'Export PNG',
+          defaultPath: join(app.getPath('documents'), defaultName),
+          filters: [{ name: 'PNG Image', extensions: ['png'] }],
+          properties: ['showOverwriteConfirmation'],
+        })
+        return selection.canceled ? null : selection.filePath ?? null
+      } finally {
+        pngExportDialogs.delete(owner)
+        if (closeAfterPngExportDialog.delete(owner) && !owner.isDestroyed()) owner.close()
+      }
+    },
+    (filePath, bytes) => writeFile(filePath, bytes),
+  )
 })
 
 app.whenReady().then(() => {

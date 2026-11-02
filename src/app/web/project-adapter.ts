@@ -1,4 +1,5 @@
 import type { ProjectOpenPort, ProjectOpenSelection } from '../../application/project-open-port'
+import { getPngFileName, type PngExportPort } from '../../application/export-png-port'
 
 type BrowserDirectoryHandle = {
   getFileHandle: (name: string) => Promise<{ getFile: () => Promise<File> }>
@@ -62,6 +63,30 @@ async function openBrowserProject(): Promise<ProjectOpenSelection> {
   return pickWithDirectoryInput()
 }
 
-export const webProjectAdapter: ProjectOpenPort = {
+export const webProjectAdapter: ProjectOpenPort & PngExportPort = {
   openProject: openBrowserProject,
+  exportPng: async ({ projectName, pngBytes }) => {
+    let objectUrl: string | null = null
+    let link: HTMLAnchorElement | null = null
+    try {
+      const pngBlob = new Blob([pngBytes], { type: 'image/png' })
+      objectUrl = URL.createObjectURL(pngBlob)
+      link = document.createElement('a')
+      link.href = objectUrl
+      link.download = getPngFileName(projectName)
+      link.hidden = true
+      document.body.append(link)
+      link.click()
+      link.remove()
+      link = null
+      const urlToRevoke = objectUrl
+      window.setTimeout(() => URL.revokeObjectURL(urlToRevoke), 1000)
+      objectUrl = null
+      return { status: 'exported' }
+    } catch {
+      link?.remove()
+      if (objectUrl) URL.revokeObjectURL(objectUrl)
+      return { status: 'error', message: 'The browser could not start the PNG download.' }
+    }
+  },
 }

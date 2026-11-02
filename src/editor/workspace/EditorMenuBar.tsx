@@ -1,14 +1,17 @@
 import { Fragment, useEffect, useRef, useState } from 'react'
 
-const fileActions = ['New Project', 'Open Project…', 'Save', 'Save As…', 'Exit']
+const fileActions = ['New Project', 'Open Project…', 'Save', 'Save As…', 'Export PNG…', 'Exit']
 
 type EditorMenuBarProps = {
   canSave: boolean
   isSaving: boolean
+  canExportPng: boolean
+  isExporting: boolean
   canUndo: boolean
   canRedo: boolean
   onSave: () => void
   onSaveAs: () => void
+  onExportPng: () => void
   onUndo: () => void
   onRedo: () => void
   onMockAction: (action: string) => void
@@ -17,10 +20,13 @@ type EditorMenuBarProps = {
 function EditorMenuBar({
   canSave,
   isSaving,
+  canExportPng,
+  isExporting,
   canUndo,
   canRedo,
   onSave,
   onSaveAs,
+  onExportPng,
   onUndo,
   onRedo,
   onMockAction,
@@ -120,21 +126,31 @@ function EditorMenuBar({
           >
             {fileActions.map((action, index) => (
               <Fragment key={action}>
-                {index === 4 && <div className="editor-file-menu__separator" role="separator" />}
+                {(index === 4 || index === 5) && <div className="editor-file-menu__separator" role="separator" />}
                 <button
                   className="editor-file-menu__item"
                   type="button"
                   role="menuitem"
                   tabIndex={-1}
-                  disabled={(action === 'Save' || action === 'Save As…') && (!canSave || isSaving)}
+                  disabled={
+                    ((action === 'Save' || action === 'Save As…') && (!canSave || isSaving)) ||
+                    (action === 'Export PNG…' && (!canExportPng || isExporting))
+                  }
                   onClick={() => {
                     if (action === 'Save') onSave()
                     else if (action === 'Save As…') onSaveAs()
+                    else if (action === 'Export PNG…') onExportPng()
                     else onMockAction(action)
                     closeFileMenu()
                   }}
                 >
-                  {action === 'Save' && !canSave ? 'Save (Unavailable)' : action === 'Save As…' && !canSave ? 'Save As… (Unavailable)' : action}
+                  {action === 'Save' && !canSave
+                    ? 'Save (Unavailable)'
+                    : action === 'Save As…' && !canSave
+                      ? 'Save As… (Unavailable)'
+                      : action === 'Export PNG…' && isExporting
+                        ? 'Exporting PNG…'
+                        : action}
                 </button>
               </Fragment>
             ))}

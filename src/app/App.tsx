@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { openProjectSession, createUntitledProjectSession, updateProjectSessionDocument, type ProjectSession } from '../application/project-session'
 import { canCloseAfterSave, requiresCloseConfirmation } from '../application/project-close-policy'
 import { DocumentHistory } from '../application/document-history'
+import { MAX_PNG_EXPORT_BYTES, type PngExportPort } from '../application/export-png-port'
 import type { ProjectOpenPort } from '../application/project-open-port'
 import type { ProjectSaveMode, ProjectSavePort } from '../application/project-save-port'
 import type { SaveProjectSessionResult } from '../application/save-project-session'
@@ -14,7 +15,7 @@ import WelcomeScreen from './screens/WelcomeScreen'
 import './app.css'
 
 type AppProps = {
-  projectAdapter: ProjectOpenPort & Partial<ProjectSavePort>
+  projectAdapter: ProjectOpenPort & Partial<ProjectSavePort & PngExportPort>
 }
 
 function App({ projectAdapter }: AppProps) {
@@ -23,6 +24,7 @@ function App({ projectAdapter }: AppProps) {
   const [editorSessionVersion, setEditorSessionVersion] = useState(0)
   const [busy, setBusy] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [exporting, setExporting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [statusMessage, setStatusMessage] = useState('')
   const [closePrompt, setClosePrompt] = useState<ClosePrompt | null>(null)
@@ -30,6 +32,7 @@ function App({ projectAdapter }: AppProps) {
   const editorWorkspaceRef = useRef<EditorWorkspaceHandle>(null)
   const historyRef = useRef<DocumentHistory | null>(null)
   const savingRef = useRef(false)
+  const exportingRef = useRef(false)
   const closePromptRef = useRef<ClosePrompt | null>(null)
 
   function updateClosePrompt(nextPrompt: ClosePrompt | null) {
@@ -192,6 +195,43 @@ function App({ projectAdapter }: AppProps) {
     }
   }
 
+  async function exportPng() {
+    const snapshot = sessionRef.current
+    const exportPort = projectAdapter.exportPng
+    if (!snapshot || !exportPort || exportingRef.current) return
+
+    exportingRef.current = true
+    setExporting(true)
+    setError(null)
+    setStatusMessage('Exporting PNG…')
+    try {
+      const { createScenePngBlob } = await import('../editor/workspace/export-scene-png')
+      const pngBlob = await createScenePngBlob(snapshot.document)
+      if (pngBlob.size > MAX_PNG_EXPORT_BYTES) {
+        throw new Error('The PNG is too large to export. Try a smaller Artboard.')
+      }
+      const pngBytes = new Uint8Array(await pngBlob.arrayBuffer())
+      const result = await exportPort({ projectName: snapshot.projectName, pngBytes })
+      if (result.status === 'cancelled') {
+        setStatusMessage('PNG export cancelled.')
+      } else if (result.status === 'error') {
+        setError(result.message)
+        setStatusMessage('PNG export failed.')
+      } else {
+        setStatusMessage('PNG exported.')
+      }
+    } catch (exportError) {
+      const message = exportError instanceof Error
+        ? exportError.message
+        : 'The Artboard could not be exported as PNG.'
+      setError(message)
+      setStatusMessage('PNG export failed.')
+    } finally {
+      exportingRef.current = false
+      setExporting(false)
+    }
+  }
+
   function finishClose(decision: 'allow' | 'cancel') {
     const request = closePromptRef.current
     if (!request) return
@@ -231,10 +271,13 @@ function App({ projectAdapter }: AppProps) {
           session={session}
           canSave={Boolean(projectAdapter.saveProject)}
           isSaving={saving}
+          canExportPng={Boolean(projectAdapter.exportPng)}
+          isExporting={exporting}
           statusMessage={error ?? statusMessage}
           isClosePromptOpen={closePrompt !== null}
           onSave={() => void save('save')}
           onSaveAs={() => void save('save-as')}
+          onExportPng={() => void exportPng()}
           canUndo={historyRef.current?.canUndo ?? false}
           canRedo={historyRef.current?.canRedo ?? false}
           onUndo={() => navigateDocumentHistory(session.projectId, session.document, 'undo')}

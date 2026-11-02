@@ -11,7 +11,7 @@
     "dev:desktop": "electron-vite dev --config electron.vite.config.ts",
     "dev:web": "vite --config vite.config.ts",
     "typecheck": "tsc --noEmit",
-    "test": "tsc -p tsconfig.test.json && node .test-dist/tests/project-save.test.js && node .test-dist/tests/project-close.test.js && node .test-dist/tests/rectangle-document.test.js && node .test-dist/tests/rectangle-geometry.test.js && node .test-dist/tests/document-history.test.js && node .test-dist/tests/text-object.test.js",
+    "test": "tsc -p tsconfig.test.json && node .test-dist/tests/project-save.test.js && node .test-dist/tests/project-close.test.js && node .test-dist/tests/rectangle-document.test.js && node .test-dist/tests/rectangle-geometry.test.js && node .test-dist/tests/document-history.test.js && node .test-dist/tests/text-object.test.js && node .test-dist/tests/png-export.test.js",
     "build": "npm run typecheck && npm run build:desktop && npm run build:web",
     "build:desktop": "electron-vite build --config electron.vite.config.ts",
     "build:web": "vite build --config vite.config.ts",

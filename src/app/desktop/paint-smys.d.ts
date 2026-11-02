@@ -1,5 +1,6 @@
 import type { ProjectOpenSelection } from '../../application/project-open-port'
 import type { ProjectSaveRequest, ProjectSaveSelection } from '../../application/project-save-port'
+import type { PngExportRequest, PngExportSelection } from '../../application/export-png-port'
 
 declare global {
   interface Window {
@@ -7,6 +8,7 @@ declare global {
       platform: string
       openProject: () => Promise<ProjectOpenSelection>
       saveProject: (request: ProjectSaveRequest) => Promise<ProjectSaveSelection>
+      exportPng: (request: PngExportRequest) => Promise<PngExportSelection>
       windowControls: {
         minimize: () => void
         toggleMaximize: () => void

@@ -4,6 +4,7 @@ import type { ProjectSession } from '../../application/project-session'
 import type { ProjectSaveMode } from '../../application/project-save-port'
 import { findTopmostObjectAtPoint, getSceneObjectBounds, isGestureLongEnough, normalizeRectangle, transformPoint, transformVector, translateRectangle, type NormalizedRectangle, type Point } from './rectangle-geometry'
 import EditorMenuBar from './EditorMenuBar'
+import { SceneSvgContent } from './SceneSvgContent'
 import ToolPanel from './ToolPanel'
 import './editor-workspace.css'
 
@@ -17,12 +18,15 @@ type EditorWorkspaceProps = {
   session: ProjectSession
   canSave: boolean
   isSaving: boolean
+  canExportPng: boolean
   canUndo: boolean
   canRedo: boolean
   statusMessage: string
+  isExporting: boolean
   isClosePromptOpen: boolean
   onSave: (mode?: ProjectSaveMode) => void
   onSaveAs: () => void
+  onExportPng: () => void
   onUndo: () => void
   onRedo: () => void
   onDocumentChange: (previousDocument: SceneDocument, document: SceneDocument) => void
@@ -107,12 +111,15 @@ const EditorWorkspace = forwardRef<EditorWorkspaceHandle, EditorWorkspaceProps>(
   session,
   canSave,
   isSaving,
+  canExportPng,
   canUndo,
   canRedo,
   statusMessage,
+  isExporting,
   isClosePromptOpen,
   onSave,
   onSaveAs,
+  onExportPng,
   onUndo,
   onRedo,
   onDocumentChange,
@@ -208,6 +215,11 @@ const EditorWorkspace = forwardRef<EditorWorkspaceHandle, EditorWorkspaceProps>(
   function handleSaveAs() {
     commitTextDraft()
     onSaveAs()
+  }
+
+  function handleExportPng() {
+    commitTextDraft()
+    onExportPng()
   }
 
   useEffect(() => {
@@ -576,10 +588,13 @@ const EditorWorkspace = forwardRef<EditorWorkspaceHandle, EditorWorkspaceProps>(
       <EditorMenuBar
         canSave={canSave}
         isSaving={isSaving}
+        canExportPng={canExportPng}
+        isExporting={isExporting}
         canUndo={canUndo}
         canRedo={canRedo}
         onSave={() => handleSave('save')}
         onSaveAs={handleSaveAs}
+        onExportPng={handleExportPng}
         onUndo={onUndo}
         onRedo={onRedo}
         onMockAction={(action) => setMockActionMessage(`${action} — mock action`)}
@@ -611,31 +626,7 @@ const EditorWorkspace = forwardRef<EditorWorkspaceHandle, EditorWorkspaceProps>(
                 onDoubleClick={handleDoubleClick}
                 onLostPointerCapture={handleLostPointerCapture}
               >
-                <rect width={artboard.width} height={artboard.height} fill={artboard.backgroundColor} />
-                {document.objects.map((object) => {
-                  const position = movePreview?.objectId === object.id ? movePreview : object
-                  if (object.type === 'text') {
-                    const lineHeight = object.fontSize * 1.2
-                    return (
-                      <text
-                        key={object.id}
-                        fontFamily={`${object.fontFamily}, monospace`}
-                        fontSize={object.fontSize}
-                        fill={object.color}
-                        xmlSpace="preserve"
-                        pointerEvents="none"
-                        aria-label={object.text}
-                      >
-                        {object.text.split('\n').map((line, index) => (
-                          <tspan key={index} x={position.x} y={position.y + object.fontSize + index * lineHeight}>
-                            {line || '\u00a0'}
-                          </tspan>
-                        ))}
-                      </text>
-                    )
-                  }
-                  return <rect key={object.id} x={position.x} y={position.y} width={object.width} height={object.height} fill={object.fill} stroke={object.stroke} strokeWidth={object.strokeWidth} />
-                })}
+                <SceneSvgContent document={document} positionPreview={movePreview} />
                 {selectedObject && visibleSelectedBounds && (
                   <>
                     <rect
