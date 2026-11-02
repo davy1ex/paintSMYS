@@ -1,7 +1,7 @@
 import type { SceneDocument } from '../../core/document/scene-document'
 
 export const PLUGIN_API_VERSION = 0
-export const MAX_PLUGIN_SOURCE_BYTES = 256 * 1024
+export const MAX_PLUGIN_SOURCE_BYTES = 768 * 1024
 export const MAX_PLUGIN_MANIFEST_BYTES = 16 * 1024
 export const MAX_PLUGIN_BATCH_OBJECTS = 500
 export const MAX_PLUGIN_FORM_FIELDS = 16

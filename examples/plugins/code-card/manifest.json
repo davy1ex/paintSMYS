@@ -1,0 +1,10 @@
+{
+  "id": "com.paintsmys.code-card",
+  "name": "Win95 Code Card",
+  "version": "1.0.0",
+  "apiVersion": 0,
+  "entry": "index.js",
+  "commands": [
+    { "id": "generate-code-card", "name": "Generate Code Card" }
+  ]
+}

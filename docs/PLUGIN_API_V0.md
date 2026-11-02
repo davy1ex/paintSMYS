@@ -15,7 +15,7 @@ Plugin API v0 supports local Desktop action plugins. A plugin contributes one or
 
 3. Start paintSMYS and open a project. The **Plugins** menu lists commands whose manifest and entry point loaded successfully.
 
-The package is an ordinary local folder containing `manifest.json` and `index.js`. There is no online installation, auto-install, dependency resolution, or hot reload. Restart the application after adding, changing, or removing a plugin. To remove one, close paintSMYS and delete its folder; objects already created remain ordinary document objects.
+The package is an ordinary local folder containing `manifest.json` and `index.js`. The entry script is limited to 768 KiB so a small plugin can include a self-contained browser bundle. There is no online installation, auto-install, dependency resolution, or hot reload. Restart the application after adding, changing, or removing a plugin. To remove one, close paintSMYS and delete its folder; objects already created remain ordinary document objects.
 
 ## Package format
 
