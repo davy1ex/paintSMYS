@@ -96,7 +96,10 @@ function EditorWorkspace({
       if (event.ctrlKey === event.metaKey) return
 
       const key = event.key.toLowerCase()
-      if ((event.ctrlKey || event.metaKey) && key === 'z') {
+      // `key` changes with the selected layout; `code` identifies the physical key.
+      const isZKey = event.code === 'KeyZ' || key === 'z' || key === 'я'
+      const isYKey = event.code === 'KeyY' || key === 'y' || key === 'н'
+      if ((event.ctrlKey || event.metaKey) && isZKey) {
         if (event.shiftKey && canRedo) {
           event.preventDefault()
           onRedo()
@@ -106,7 +109,7 @@ function EditorWorkspace({
         }
         return
       }
-      if (event.ctrlKey && !event.shiftKey && key === 'y' && canRedo) {
+      if (event.ctrlKey && !event.shiftKey && isYKey && canRedo) {
         event.preventDefault()
         onRedo()
         return
