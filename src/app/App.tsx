@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { openProjectSession, createUntitledProjectSession, updateProjectSessionDocument, type ProjectSession } from '../application/project-session'
 import { canCloseAfterSave, requiresCloseConfirmation } from '../application/project-close-policy'
+import { DocumentHistory } from '../application/document-history'
 import type { ProjectOpenPort } from '../application/project-open-port'
 import type { ProjectSaveMode, ProjectSavePort } from '../application/project-save-port'
 import type { SaveProjectSessionResult } from '../application/save-project-session'
@@ -26,6 +27,7 @@ function App({ projectAdapter }: AppProps) {
   const [statusMessage, setStatusMessage] = useState('')
   const [closePrompt, setClosePrompt] = useState<ClosePrompt | null>(null)
   const sessionRef = useRef<ProjectSession | null>(null)
+  const historyRef = useRef<DocumentHistory | null>(null)
   const savingRef = useRef(false)
   const closePromptRef = useRef<ClosePrompt | null>(null)
 
@@ -35,7 +37,10 @@ function App({ projectAdapter }: AppProps) {
   }
 
   function setActiveSession(nextSession: ProjectSession, resetEditorState = false) {
-    if (resetEditorState) setEditorSessionVersion((version) => version + 1)
+    if (resetEditorState) {
+      setEditorSessionVersion((version) => version + 1)
+      historyRef.current = new DocumentHistory(nextSession.isDirty ? null : nextSession.document)
+    }
     sessionRef.current = nextSession
     setSession(nextSession)
   }
@@ -107,16 +112,45 @@ function App({ projectAdapter }: AppProps) {
     setActiveSession(createUntitledProjectSession(width, height), true)
   }
 
-  function updateDocument(sourceProjectId: string, sourceDocumentId: string, document: SceneDocument) {
+  function publishDocumentChange(
+    current: ProjectSession,
+    document: SceneDocument,
+    history: DocumentHistory,
+    recordChange: boolean,
+  ) {
+    if (recordChange && !history.recordChange(current.document, document)) return
+    const nextSession = updateProjectSessionDocument(current, document, history.isDirty(document))
+    sessionRef.current = nextSession
+    setSession(nextSession)
+  }
+
+  function updateDocument(sourceProjectId: string, previousDocument: SceneDocument, document: SceneDocument) {
     const current = sessionRef.current
-    if (!current || current.projectId !== sourceProjectId || current.document.id !== sourceDocumentId) return
-    setActiveSession(updateProjectSessionDocument(current, document))
+    const history = historyRef.current
+    if (
+      !current || !history || current.projectId !== sourceProjectId ||
+      current.document !== previousDocument || previousDocument === document
+    ) return
+    publishDocumentChange(current, document, history, true)
+  }
+
+  function navigateDocumentHistory(
+    sourceProjectId: string,
+    sourceDocument: SceneDocument,
+    direction: 'undo' | 'redo',
+  ) {
+    const current = sessionRef.current
+    const history = historyRef.current
+    if (!current || !history || current.projectId !== sourceProjectId || current.document !== sourceDocument) return
+    const document = direction === 'undo' ? history.undo(current.document) : history.redo(current.document)
+    if (document) publishDocumentChange(current, document, history, false)
   }
 
   async function save(mode: ProjectSaveMode = 'save'): Promise<SaveProjectSessionResult | null> {
     if (!projectAdapter.saveProject || savingRef.current) return null
     const snapshot = sessionRef.current
-    if (!snapshot) return null
+    const snapshotHistory = historyRef.current
+    if (!snapshot || !snapshotHistory) return null
 
     savingRef.current = true
     setSaving(true)
@@ -135,11 +169,14 @@ function App({ projectAdapter }: AppProps) {
       }
 
       const current = sessionRef.current
+      if (historyRef.current !== snapshotHistory) return null
       const updatedSession = mergeSavedProjectSession(snapshot, current, result.session)
       if (!updatedSession) return null
-      setActiveSession(updatedSession)
-      setStatusMessage(updatedSession.isDirty ? 'Saved. Newer changes still need saving.' : 'Project saved.')
-      return { status: 'saved', session: updatedSession }
+      snapshotHistory.markSaved(snapshot.document)
+      const savedSession = { ...updatedSession, isDirty: snapshotHistory.isDirty(updatedSession.document) }
+      setActiveSession(savedSession)
+      setStatusMessage(savedSession.isDirty ? 'Saved. Newer changes still need saving.' : 'Project saved.')
+      return { status: 'saved', session: savedSession }
     } catch (saveError) {
       const message = saveError instanceof Error ? saveError.message : 'The project could not be saved.'
       setError(message)
@@ -193,7 +230,11 @@ function App({ projectAdapter }: AppProps) {
           isClosePromptOpen={closePrompt !== null}
           onSave={() => void save('save')}
           onSaveAs={() => void save('save-as')}
-          onDocumentChange={(document) => updateDocument(session.projectId, session.document.id, document)}
+          canUndo={historyRef.current?.canUndo ?? false}
+          canRedo={historyRef.current?.canRedo ?? false}
+          onUndo={() => navigateDocumentHistory(session.projectId, session.document, 'undo')}
+          onRedo={() => navigateDocumentHistory(session.projectId, session.document, 'redo')}
+          onDocumentChange={(previous, document) => updateDocument(session.projectId, previous, document)}
         />
         <CloseProjectDialog
           request={closePrompt}

@@ -5,33 +5,56 @@ const fileActions = ['New Project', 'Open Project…', 'Save', 'Save As…', 'Ex
 type EditorMenuBarProps = {
   canSave: boolean
   isSaving: boolean
+  canUndo: boolean
+  canRedo: boolean
   onSave: () => void
   onSaveAs: () => void
+  onUndo: () => void
+  onRedo: () => void
   onMockAction: (action: string) => void
 }
 
-function EditorMenuBar({ canSave, isSaving, onSave, onSaveAs, onMockAction }: EditorMenuBarProps) {
+function EditorMenuBar({
+  canSave,
+  isSaving,
+  canUndo,
+  canRedo,
+  onSave,
+  onSaveAs,
+  onUndo,
+  onRedo,
+  onMockAction,
+}: EditorMenuBarProps) {
   const [fileMenuOpen, setFileMenuOpen] = useState(false)
-  const menuGroupRef = useRef<HTMLDivElement>(null)
+  const [editMenuOpen, setEditMenuOpen] = useState(false)
+  const fileGroupRef = useRef<HTMLDivElement>(null)
+  const editGroupRef = useRef<HTMLDivElement>(null)
   const fileButtonRef = useRef<HTMLButtonElement>(null)
-  const menuRef = useRef<HTMLDivElement>(null)
+  const editButtonRef = useRef<HTMLButtonElement>(null)
+  const fileMenuRef = useRef<HTMLDivElement>(null)
+  const editMenuRef = useRef<HTMLDivElement>(null)
+  const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform)
 
   useEffect(() => {
-    if (!fileMenuOpen) return
+    if (!fileMenuOpen && !editMenuOpen) return
 
-    menuRef.current?.querySelector<HTMLButtonElement>('[role="menuitem"]')?.focus()
+    const activeMenu = editMenuOpen ? editMenuRef.current : fileMenuRef.current
+    activeMenu?.querySelector<HTMLButtonElement>('[role="menuitem"]:not(:disabled)')?.focus()
 
     const handlePointerDown = (event: PointerEvent) => {
-      if (!menuGroupRef.current?.contains(event.target as Node)) {
+      const target = event.target as Node
+      if (!fileGroupRef.current?.contains(target) && !editGroupRef.current?.contains(target)) {
         setFileMenuOpen(false)
+        setEditMenuOpen(false)
       }
     }
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        event.preventDefault()
-        setFileMenuOpen(false)
-        fileButtonRef.current?.focus()
-      }
+      if (event.key !== 'Escape') return
+      event.preventDefault()
+      setFileMenuOpen(false)
+      setEditMenuOpen(false)
+      if (editMenuOpen) editButtonRef.current?.focus()
+      else fileButtonRef.current?.focus()
     }
 
     document.addEventListener('pointerdown', handlePointerDown)
@@ -40,10 +63,10 @@ function EditorMenuBar({ canSave, isSaving, onSave, onSaveAs, onMockAction }: Ed
       document.removeEventListener('pointerdown', handlePointerDown)
       document.removeEventListener('keydown', handleKeyDown)
     }
-  }, [fileMenuOpen])
+  }, [editMenuOpen, fileMenuOpen])
 
-  const moveMenuFocus = (key: string) => {
-    const items = menuRef.current?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')
+  const moveMenuFocus = (menuRef: React.RefObject<HTMLDivElement | null>, key: string) => {
+    const items = menuRef.current?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]:not(:disabled)')
     if (!items?.length) return
 
     const currentIndex = Array.from(items).indexOf(document.activeElement as HTMLButtonElement)
@@ -55,9 +78,18 @@ function EditorMenuBar({ canSave, isSaving, onSave, onSaveAs, onMockAction }: Ed
     items[nextIndex]?.focus()
   }
 
+  const closeFileMenu = () => {
+    setFileMenuOpen(false)
+    fileButtonRef.current?.focus()
+  }
+  const closeEditMenu = () => {
+    setEditMenuOpen(false)
+    editButtonRef.current?.focus()
+  }
+
   return (
     <nav className="editor-menu-bar" aria-label="Main menu">
-      <div className="editor-menu-group" ref={menuGroupRef}>
+      <div className="editor-menu-group" ref={fileGroupRef}>
         <button
           className="editor-menu-trigger"
           type="button"
@@ -65,7 +97,10 @@ function EditorMenuBar({ canSave, isSaving, onSave, onSaveAs, onMockAction }: Ed
           aria-haspopup="menu"
           aria-expanded={fileMenuOpen}
           aria-controls="editor-file-menu"
-          onClick={() => setFileMenuOpen((open) => !open)}
+          onClick={() => {
+            setEditMenuOpen(false)
+            setFileMenuOpen((open) => !open)
+          }}
         >
           File
         </button>
@@ -75,11 +110,11 @@ function EditorMenuBar({ canSave, isSaving, onSave, onSaveAs, onMockAction }: Ed
             id="editor-file-menu"
             role="menu"
             aria-label="File"
-            ref={menuRef}
+            ref={fileMenuRef}
             onKeyDown={(event) => {
               if (['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) {
                 event.preventDefault()
-                moveMenuFocus(event.key)
+                moveMenuFocus(fileMenuRef, event.key)
               }
             }}
           >
@@ -96,8 +131,7 @@ function EditorMenuBar({ canSave, isSaving, onSave, onSaveAs, onMockAction }: Ed
                     if (action === 'Save') onSave()
                     else if (action === 'Save As…') onSaveAs()
                     else onMockAction(action)
-                    setFileMenuOpen(false)
-                    fileButtonRef.current?.focus()
+                    closeFileMenu()
                   }}
                 >
                   {action === 'Save' && !canSave ? 'Save (Unavailable)' : action === 'Save As…' && !canSave ? 'Save As… (Unavailable)' : action}
@@ -107,7 +141,59 @@ function EditorMenuBar({ canSave, isSaving, onSave, onSaveAs, onMockAction }: Ed
           </div>
         )}
       </div>
-      <span>Edit</span><span>View</span><span>Help</span>
+      <div className="editor-menu-group" ref={editGroupRef}>
+        <button
+          className="editor-menu-trigger"
+          type="button"
+          ref={editButtonRef}
+          aria-haspopup="menu"
+          aria-expanded={editMenuOpen}
+          aria-controls="editor-edit-menu"
+          onClick={() => {
+            setFileMenuOpen(false)
+            setEditMenuOpen((open) => !open)
+          }}
+        >
+          Edit
+        </button>
+        {editMenuOpen && (
+          <div
+            className="editor-edit-menu"
+            id="editor-edit-menu"
+            role="menu"
+            aria-label="Edit"
+            ref={editMenuRef}
+            onKeyDown={(event) => {
+              if (['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) {
+                event.preventDefault()
+                moveMenuFocus(editMenuRef, event.key)
+              }
+            }}
+          >
+            <button
+              className="editor-edit-menu__item"
+              type="button"
+              role="menuitem"
+              tabIndex={-1}
+              disabled={!canUndo}
+              onClick={() => { onUndo(); closeEditMenu() }}
+            >
+              <span>Undo</span><span className="editor-edit-menu__shortcut">{isMac ? '⌘Z' : 'Ctrl+Z'}</span>
+            </button>
+            <button
+              className="editor-edit-menu__item"
+              type="button"
+              role="menuitem"
+              tabIndex={-1}
+              disabled={!canRedo}
+              onClick={() => { onRedo(); closeEditMenu() }}
+            >
+              <span>Redo</span><span className="editor-edit-menu__shortcut">{isMac ? '⌘⇧Z' : 'Ctrl+Y / Ctrl+Shift+Z'}</span>
+            </button>
+          </div>
+        )}
+      </div>
+      <span>View</span><span>Help</span>
     </nav>
   )
 }

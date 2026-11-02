@@ -13,11 +13,15 @@ type EditorWorkspaceProps = {
   session: ProjectSession
   canSave: boolean
   isSaving: boolean
+  canUndo: boolean
+  canRedo: boolean
   statusMessage: string
   isClosePromptOpen: boolean
   onSave: (mode?: ProjectSaveMode) => void
   onSaveAs: () => void
-  onDocumentChange: (document: SceneDocument) => void
+  onUndo: () => void
+  onRedo: () => void
+  onDocumentChange: (previousDocument: SceneDocument, document: SceneDocument) => void
 }
 
 type RectangleGesture = {
@@ -39,7 +43,20 @@ function isEditableTarget(target: EventTarget | null): boolean {
   return target.isContentEditable || target.closest('input, textarea, select') !== null
 }
 
-function EditorWorkspace({ session, canSave, isSaving, statusMessage, isClosePromptOpen, onSave, onSaveAs, onDocumentChange }: EditorWorkspaceProps) {
+function EditorWorkspace({
+  session,
+  canSave,
+  isSaving,
+  canUndo,
+  canRedo,
+  statusMessage,
+  isClosePromptOpen,
+  onSave,
+  onSaveAs,
+  onUndo,
+  onRedo,
+  onDocumentChange,
+}: EditorWorkspaceProps) {
   const canvasRef = useRef<HTMLDivElement>(null)
   const svgRef = useRef<SVGSVGElement>(null)
   const gestureRef = useRef<RectangleGesture | null>(null)
@@ -72,14 +89,36 @@ function EditorWorkspace({ session, canSave, isSaving, statusMessage, isClosePro
 
   useEffect(() => {
     const handleShortcut = (event: KeyboardEvent) => {
-      if (canSave && (event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') {
+      if (
+        isClosePromptOpen || globalThis.document.querySelector('dialog[open]') ||
+        isEditableTarget(event.target) || event.altKey || event.isComposing
+      ) return
+      if (event.ctrlKey === event.metaKey) return
+
+      const key = event.key.toLowerCase()
+      if ((event.ctrlKey || event.metaKey) && key === 'z') {
+        if (event.shiftKey && canRedo) {
+          event.preventDefault()
+          onRedo()
+        } else if (!event.shiftKey && canUndo) {
+          event.preventDefault()
+          onUndo()
+        }
+        return
+      }
+      if (event.ctrlKey && !event.shiftKey && key === 'y' && canRedo) {
+        event.preventDefault()
+        onRedo()
+        return
+      }
+      if (canSave && !event.shiftKey && (event.ctrlKey || event.metaKey) && key === 's') {
         event.preventDefault()
         if (!isSaving) onSave()
       }
     }
     globalThis.document.addEventListener('keydown', handleShortcut)
     return () => globalThis.document.removeEventListener('keydown', handleShortcut)
-  }, [canSave, isSaving, onSave])
+  }, [canRedo, canSave, canUndo, isClosePromptOpen, isSaving, onRedo, onSave, onUndo])
 
   useEffect(() => {
     const updatePreview = (clientX: number, clientY: number, pointerId?: number) => {
@@ -103,7 +142,7 @@ function EditorWorkspace({ session, canSave, isSaving, statusMessage, isClosePro
 
       const rectangle: RectangleGeometry = normalizeRectangle(gesture.startArtboard, end)
       if (rectangle.width <= 0 || rectangle.height <= 0 || !Object.values(rectangle).every(Number.isFinite)) return
-      onDocumentChange(addRectangle(document, rectangle))
+      onDocumentChange(document, addRectangle(document, rectangle))
     }
 
     const handlePointerMove = (event: PointerEvent) => {
@@ -184,7 +223,7 @@ function EditorWorkspace({ session, canSave, isSaving, statusMessage, isClosePro
       }
 
       setSelectedObjectId(null)
-      onDocumentChange(removeObject(document, selectedObjectId))
+      onDocumentChange(document, removeObject(document, selectedObjectId))
     }
 
     globalThis.document.addEventListener('keydown', handleDelete)
@@ -225,8 +264,12 @@ function EditorWorkspace({ session, canSave, isSaving, statusMessage, isClosePro
       <EditorMenuBar
         canSave={canSave}
         isSaving={isSaving}
+        canUndo={canUndo}
+        canRedo={canRedo}
         onSave={() => onSave('save')}
         onSaveAs={onSaveAs}
+        onUndo={onUndo}
+        onRedo={onRedo}
         onMockAction={(action) => setMockActionMessage(`${action} — mock action`)}
       />
       <div className="editor-toolbar" aria-label="Editor status">

@@ -30,10 +30,14 @@ export function openProjectSession(manifestText: string, projectRoot: string | n
   }
 }
 
-export function updateProjectSessionDocument(session: ProjectSession, document: SceneDocument): ProjectSession {
+export function updateProjectSessionDocument(
+  session: ProjectSession,
+  document: SceneDocument,
+  isDirty = true,
+): ProjectSession {
   return {
     ...session,
     document,
-    isDirty: true,
+    isDirty,
   }
 }
