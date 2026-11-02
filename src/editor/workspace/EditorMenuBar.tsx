@@ -3,10 +3,14 @@ import { Fragment, useEffect, useRef, useState } from 'react'
 const fileActions = ['New Project', 'Open Project…', 'Save', 'Save As…', 'Exit']
 
 type EditorMenuBarProps = {
+  canSave: boolean
+  isSaving: boolean
+  onSave: () => void
+  onSaveAs: () => void
   onMockAction: (action: string) => void
 }
 
-function EditorMenuBar({ onMockAction }: EditorMenuBarProps) {
+function EditorMenuBar({ canSave, isSaving, onSave, onSaveAs, onMockAction }: EditorMenuBarProps) {
   const [fileMenuOpen, setFileMenuOpen] = useState(false)
   const menuGroupRef = useRef<HTMLDivElement>(null)
   const fileButtonRef = useRef<HTMLButtonElement>(null)
@@ -87,13 +91,16 @@ function EditorMenuBar({ onMockAction }: EditorMenuBarProps) {
                   type="button"
                   role="menuitem"
                   tabIndex={-1}
+                  disabled={(action === 'Save' || action === 'Save As…') && (!canSave || isSaving)}
                   onClick={() => {
-                    onMockAction(action)
+                    if (action === 'Save') onSave()
+                    else if (action === 'Save As…') onSaveAs()
+                    else onMockAction(action)
                     setFileMenuOpen(false)
                     fileButtonRef.current?.focus()
                   }}
                 >
-                  {action}
+                  {action === 'Save' && !canSave ? 'Save (Unavailable)' : action === 'Save As…' && !canSave ? 'Save As… (Unavailable)' : action}
                 </button>
               </Fragment>
             ))}

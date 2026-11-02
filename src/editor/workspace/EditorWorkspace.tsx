@@ -1,13 +1,19 @@
 import { useEffect, useRef, useState } from 'react'
 import type { ProjectSession } from '../../application/project-session'
+import type { ProjectSaveMode } from '../../application/project-save-port'
 import EditorMenuBar from './EditorMenuBar'
 import './editor-workspace.css'
 
 type EditorWorkspaceProps = {
   session: ProjectSession
+  canSave: boolean
+  isSaving: boolean
+  statusMessage: string
+  onSave: (mode?: ProjectSaveMode) => void
+  onSaveAs: () => void
 }
 
-function EditorWorkspace({ session }: EditorWorkspaceProps) {
+function EditorWorkspace({ session, canSave, isSaving, statusMessage, onSave, onSaveAs }: EditorWorkspaceProps) {
   const canvasRef = useRef<HTMLDivElement>(null)
   const [viewportSize, setViewportSize] = useState({ width: 0, height: 0 })
   const [mockActionMessage, setMockActionMessage] = useState('')
@@ -32,9 +38,26 @@ function EditorWorkspace({ session }: EditorWorkspaceProps) {
     return () => observer.disconnect()
   }, [])
 
+  useEffect(() => {
+    const handleShortcut = (event: KeyboardEvent) => {
+      if (canSave && (event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') {
+        event.preventDefault()
+        if (!isSaving) onSave()
+      }
+    }
+    globalThis.document.addEventListener('keydown', handleShortcut)
+    return () => globalThis.document.removeEventListener('keydown', handleShortcut)
+  }, [canSave, isSaving, onSave])
+
   return (
     <main className="editor-shell">
-      <EditorMenuBar onMockAction={(action) => setMockActionMessage(`${action} — mock action`)} />
+      <EditorMenuBar
+        canSave={canSave}
+        isSaving={isSaving}
+        onSave={() => onSave('save')}
+        onSaveAs={onSaveAs}
+        onMockAction={(action) => setMockActionMessage(`${action} — mock action`)}
+      />
       <div className="editor-toolbar" aria-label="Editor status">
         <div className="editor-project-mark" aria-hidden="true">P</div>
         <strong className="editor-project-name">{session.projectName}</strong>
@@ -88,7 +111,7 @@ function EditorWorkspace({ session }: EditorWorkspaceProps) {
       </div>
       <footer className="editor-statusbar">
         <span>{session.projectRoot ? 'Project opened from folder' : session.isDirty ? 'Project folder not set' : 'Opened in browser'}</span>
-        <span className="editor-status-message" role="status" aria-live="polite" aria-atomic="true">{mockActionMessage}</span>
+        <span className="editor-status-message" role="status" aria-live="polite" aria-atomic="true">{statusMessage || mockActionMessage || (isSaving ? 'Saving…' : '')}</span>
         <span>paintSMYS</span>
       </footer>
     </main>

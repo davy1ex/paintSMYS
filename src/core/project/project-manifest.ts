@@ -10,6 +10,20 @@ export type ProjectManifest = {
   scene: SceneDocument
 }
 
+export function createProjectManifest(projectId: string, projectName: string, scene: SceneDocument): ProjectManifest {
+  return parseProjectManifest(JSON.stringify({
+    format: PROJECT_FORMAT,
+    formatVersion: PROJECT_FORMAT_VERSION,
+    project: { id: projectId, name: projectName },
+    scene,
+  }))
+}
+
+export function serializeProjectManifest(manifest: ProjectManifest): string {
+  const validated = createProjectManifest(manifest.project.id, manifest.project.name, manifest.scene)
+  return `${JSON.stringify(validated, null, 2)}\n`
+}
+
 export class ProjectFormatError extends Error {
   constructor(message: string) {
     super(message)
