@@ -198,6 +198,7 @@ export class IsolatedPluginRuntime implements PluginRuntime {
     if (!active || active.id !== pending.invocationId) return
     active.cancelled = true
     active.transaction.rollback()
+    this.interruptInvocation(pending.frame, pending.invocationId)
     this.finishInvocation(pending.frame, pending.invocationId, null, false)
   }
 
@@ -262,7 +263,10 @@ export class IsolatedPluginRuntime implements PluginRuntime {
         if ((data.kind === 'load-error' || data.kind === 'runtime-error') && typeof data.message === 'string') {
           const error = new Error(data.message.slice(0, 500))
           if (!settled) finishLoad({ commands: [], error: error.message })
-          else if (pluginFrame.active) this.finishInvocation(pluginFrame, pluginFrame.active.id, error, false)
+          else if (pluginFrame.active) {
+            this.interruptInvocation(pluginFrame, pluginFrame.active.id)
+            this.finishInvocation(pluginFrame, pluginFrame.active.id, error, false)
+          }
           else if (data.kind === 'runtime-error') this.host.showError(`${plugin.manifest.name}: ${error.message}`)
           return
         }
@@ -357,6 +361,10 @@ export class IsolatedPluginRuntime implements PluginRuntime {
     pluginFrame.frame.contentWindow?.postMessage({ kind: 'response', requestId, success, value, message }, '*')
   }
 
+  private interruptInvocation(frame: PluginFrame, invocationId: string): void {
+    frame.frame.contentWindow?.postMessage({ kind: 'interrupt', invocationId }, '*')
+  }
+
   private openForm(frame: PluginFrame, active: ActiveInvocation, requestId: string, schema: PluginFormSchema): void {
     this.pauseExecutionTimeout(active)
     const pending: PendingForm = {
@@ -402,7 +410,10 @@ export class IsolatedPluginRuntime implements PluginRuntime {
       message: error.message.slice(0, 500),
     }, '*')
     const active = pending.frame.active
-    if (active?.id === pending.invocationId) this.finishInvocation(pending.frame, pending.invocationId, error, false)
+    if (active?.id === pending.invocationId) {
+      this.interruptInvocation(pending.frame, pending.invocationId)
+      this.finishInvocation(pending.frame, pending.invocationId, error, false)
+    }
   }
 
   private pauseExecutionTimeout(active: ActiveInvocation): void {
@@ -421,6 +432,7 @@ export class IsolatedPluginRuntime implements PluginRuntime {
     }
     active.timeoutStartedAt = Date.now()
     active.timeoutId = window.setTimeout(() => {
+      this.interruptInvocation(frame, active.id)
       this.finishInvocation(frame, active.id, new Error('The plugin command took too long.'), false)
     }, active.remainingExecutionMs)
   }

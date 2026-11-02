@@ -4,139 +4,254 @@
     <meta charset="utf-8" />
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'none'; script-src 'unsafe-inline' blob:; connect-src 'none'; img-src data:; style-src 'none'; font-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; navigate-to 'none'; frame-src 'none'; worker-src 'none'"
+      content="default-src 'none'; script-src 'unsafe-inline' blob:; connect-src 'none'; img-src data:; style-src 'none'; font-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; navigate-to 'none'; frame-src 'none'; worker-src blob:"
     />
     <title>paintSMYS Plugin Runtime</title>
   </head>
   <body>
     <script>
       (() => {
-        const handlers = new Map()
-        const pending = new Map()
         const maxFormSchemaBytes = 64 * 1024
         const maxFormResponseBytes = 32 * 1024
-        let requestSequence = 0
         let initialized = false
-        let capabilities = new Set()
+        let loadedOnce = false
+        let pluginSource = ''
+        let pluginCommandIds = []
+        let pluginCapabilities = []
+        let worker = null
+        let workerReady = false
+        let workerFailed = false
+        let activeInvocationId = null
+        const queuedMessages = []
         const send = (message) => parent.postMessage(message, '*')
         const messageError = (error) => error instanceof Error ? error.message : String(error)
-        const reportError = (message) => send({ kind: 'runtime-error', message: String(message).slice(0, 500) })
 
-        window.addEventListener('error', (event) => reportError(event.message || 'The plugin script failed.'))
-        window.addEventListener('unhandledrejection', (event) => reportError(messageError(event.reason)))
+        function workerBootstrap(sourceUrl, commandIds, capabilities) {
+          return `
+            (() => {
+              const bootstrapUrl = self.location.href
+              URL.revokeObjectURL(bootstrapUrl)
+              const handlers = new Map()
+              const pending = new Map()
+              const expected = new Set(${JSON.stringify(commandIds)})
+              const capabilities = new Set(${JSON.stringify(capabilities)})
+              const pluginSourceUrl = ${JSON.stringify(sourceUrl)}
+              let requestSequence = 0
+              const send = (message) => self.postMessage(message)
+              const messageError = (error) => error instanceof Error ? error.message : String(error)
+              const reportError = (message) => send({ kind: 'runtime-error', message: String(message).slice(0, 500) })
 
-        function makeCommandApi(invocationId) {
-          const request = (method, args) => new Promise((resolve, reject) => {
-            if (method === 'show-form') {
-              let schemaBytes
-              try {
-                schemaBytes = new TextEncoder().encode(JSON.stringify(args[0])).byteLength
-              } catch {
-                reject(new Error('The plugin form schema must contain only JSON-compatible values.'))
-                return
-              }
-              if (schemaBytes > maxFormSchemaBytes) {
-                reject(new Error(`The plugin form schema exceeds ${maxFormSchemaBytes} bytes.`))
-                return
-              }
-            }
-            const requestId = `${invocationId}:${++requestSequence}`
-            pending.set(requestId, { resolve, reject, method })
-            send({ kind: 'request', invocationId, requestId, method, args })
-          })
-          const api = {
-            snapshotDocument: () => request('snapshot-document', []),
-            addObjects: (objects) => request('add-objects', [objects]),
-            showError: (message) => request('show-error', [message]),
-          }
-          if (capabilities.has('ui.showForm')) {
-            api.ui = Object.freeze({ showForm: (schema) => request('show-form', [schema]) })
-          }
-          return Object.freeze(api)
-        }
+              self.addEventListener('error', (event) => reportError(event.message || 'The plugin script failed.'))
+              self.addEventListener('unhandledrejection', (event) => reportError(messageError(event.reason)))
 
-        async function loadPlugin(data) {
-          if (initialized) return
-          initialized = true
-          const expected = new Set(data.commandIds)
-          const blobUrl = URL.createObjectURL(new Blob([data.source], { type: 'text/javascript' }))
-          const script = document.createElement('script')
-          script.src = blobUrl
-          script.onerror = () => {
-            URL.revokeObjectURL(blobUrl)
-            send({ kind: 'load-error', message: 'The plugin entry point could not be executed.' })
-          }
-          script.onload = async () => {
-            URL.revokeObjectURL(blobUrl)
-            try {
-              const plugin = globalThis.paintSMYSPlugin
-              if (!plugin || typeof plugin.activate !== 'function') {
-                throw new Error('The entry point must define paintSMYSPlugin.activate(api).')
-              }
-              const activationApi = Object.freeze({
-                registerCommand(commandId, handler) {
-                  if (typeof commandId !== 'string' || !expected.has(commandId)) {
-                    throw new Error('The plugin registered a command that is not declared in its manifest.')
+              function makeCommandApi(invocationId) {
+                const request = (method, args) => new Promise((resolve, reject) => {
+                  if (method === 'show-form') {
+                    let schemaBytes
+                    try {
+                      schemaBytes = new TextEncoder().encode(JSON.stringify(args[0])).byteLength
+                    } catch {
+                      reject(new Error('The plugin form schema must contain only JSON-compatible values.'))
+                      return
+                    }
+                    if (schemaBytes > ${maxFormSchemaBytes}) {
+                      reject(new Error('The plugin form schema exceeds ${maxFormSchemaBytes} bytes.'))
+                      return
+                    }
                   }
-                  if (handlers.has(commandId) || typeof handler !== 'function') {
-                    throw new Error('Plugin command IDs must be registered once with a function.')
+                  const requestId = invocationId + ':' + (++requestSequence)
+                  pending.set(requestId, { resolve, reject, method })
+                  send({ kind: 'request', invocationId, requestId, method, args })
+                })
+                const api = {
+                  snapshotDocument: () => request('snapshot-document', []),
+                  addObjects: (objects) => request('add-objects', [objects]),
+                  showError: (message) => request('show-error', [message]),
+                }
+                if (capabilities.has('ui.showForm')) {
+                  api.ui = Object.freeze({ showForm: (schema) => request('show-form', [schema]) })
+                }
+                return Object.freeze(api)
+              }
+
+              async function activatePlugin() {
+                try {
+                  try {
+                    importScripts(pluginSourceUrl)
+                  } finally {
+                    URL.revokeObjectURL(pluginSourceUrl)
                   }
-                  handlers.set(commandId, handler)
-                },
+                  const plugin = globalThis.paintSMYSPlugin
+                  if (!plugin || typeof plugin.activate !== 'function') {
+                    throw new Error('The entry point must define paintSMYSPlugin.activate(api).')
+                  }
+                  const activationApi = Object.freeze({
+                    registerCommand(commandId, handler) {
+                      if (typeof commandId !== 'string' || !expected.has(commandId)) {
+                        throw new Error('The plugin registered a command that is not declared in its manifest.')
+                      }
+                      if (handlers.has(commandId) || typeof handler !== 'function') {
+                        throw new Error('Plugin command IDs must be registered once with a function.')
+                      }
+                      handlers.set(commandId, handler)
+                    },
+                  })
+                  await plugin.activate(activationApi)
+                  send({ kind: 'ready', commandIds: Array.from(handlers.keys()) })
+                } catch (error) {
+                  send({ kind: 'load-error', message: messageError(error).slice(0, 500) })
+                }
+              }
+
+              self.addEventListener('message', async (event) => {
+                const data = event.data
+                if (!data || typeof data !== 'object') return
+                if (data.kind === 'response' && typeof data.requestId === 'string') {
+                  const entry = pending.get(data.requestId)
+                  if (!entry) return
+                  pending.delete(data.requestId)
+                  if (data.success) {
+                    if (entry.method === 'show-form') {
+                      let responseBytes
+                      try {
+                        responseBytes = new TextEncoder().encode(JSON.stringify(data.value)).byteLength
+                      } catch {
+                        entry.reject(new Error('The plugin form response is invalid.'))
+                        return
+                      }
+                      if (responseBytes > ${maxFormResponseBytes}) {
+                        entry.reject(new Error('The plugin form response exceeds ${maxFormResponseBytes} bytes.'))
+                        return
+                      }
+                    }
+                    entry.resolve(data.value)
+                  } else {
+                    entry.reject(new Error(typeof data.message === 'string' ? data.message : 'The host rejected the plugin request.'))
+                  }
+                  return
+                }
+                if (data.kind === 'invoke' && typeof data.commandId === 'string' && typeof data.invocationId === 'string') {
+                  const handler = handlers.get(data.commandId)
+                  if (!handler) {
+                    send({ kind: 'finished', invocationId: data.invocationId, success: false, message: 'The plugin command is not registered.' })
+                    return
+                  }
+                  try {
+                    await handler(makeCommandApi(data.invocationId))
+                    send({ kind: 'finished', invocationId: data.invocationId, success: true })
+                  } catch (error) {
+                    send({ kind: 'finished', invocationId: data.invocationId, success: false, message: messageError(error).slice(0, 500) })
+                  }
+                }
               })
-              await plugin.activate(activationApi)
-              send({ kind: 'ready', commandIds: Array.from(handlers.keys()) })
-            } catch (error) {
-              send({ kind: 'load-error', message: messageError(error).slice(0, 500) })
-            }
-          }
-          document.head.appendChild(script)
+
+              void activatePlugin()
+            })()
+          `
         }
 
-        window.addEventListener('message', async (event) => {
+        function startWorker() {
+          workerReady = false
+          workerFailed = false
+          try {
+            const sourceUrl = URL.createObjectURL(new Blob([pluginSource], { type: 'text/javascript' }))
+            const bootstrapUrl = URL.createObjectURL(new Blob([
+              workerBootstrap(sourceUrl, pluginCommandIds, pluginCapabilities),
+            ], { type: 'text/javascript' }))
+            const nextWorker = new Worker(bootstrapUrl)
+            worker = nextWorker
+            nextWorker.addEventListener('message', (event) => {
+              if (worker !== nextWorker) return
+              const data = event.data
+              if (!data || typeof data !== 'object') return
+              if (data.kind === 'ready') {
+                workerReady = true
+                workerFailed = false
+                loadedOnce = true
+                while (queuedMessages.length > 0) nextWorker.postMessage(queuedMessages.shift())
+              } else if (data.kind === 'load-error') {
+                workerFailed = true
+                queuedMessages.length = 0
+                if (loadedOnce) {
+                  send({ kind: 'runtime-error', message: typeof data.message === 'string' ? data.message : 'The plugin worker could not restart.' })
+                  return
+                }
+              } else if (data.kind === 'finished' && data.invocationId === activeInvocationId) {
+                activeInvocationId = null
+              }
+              send(data)
+            })
+            nextWorker.addEventListener('error', (event) => {
+              if (worker !== nextWorker) return
+              event.preventDefault()
+              workerFailed = true
+              queuedMessages.length = 0
+              const message = event.message || 'The plugin worker stopped unexpectedly.'
+              send({ kind: loadedOnce ? 'runtime-error' : 'load-error', message: String(message).slice(0, 500) })
+            })
+            nextWorker.addEventListener('messageerror', () => {
+              if (worker !== nextWorker) return
+              send({ kind: 'runtime-error', message: 'The plugin worker returned an unreadable message.' })
+            })
+            nextWorker.addEventListener('error', () => URL.revokeObjectURL(bootstrapUrl), { once: true })
+            // The worker revokes its own bootstrap URL after startup; this listener only handles startup failures.
+          } catch (error) {
+            workerFailed = true
+            send({ kind: loadedOnce ? 'runtime-error' : 'load-error', message: messageError(error).slice(0, 500) })
+          }
+        }
+
+        function sendToWorker(data) {
+          if (workerFailed) {
+            if (data.kind === 'invoke') {
+              send({ kind: 'finished', invocationId: data.invocationId, success: false, message: 'The plugin worker is unavailable. Reload the editor to try again.' })
+            }
+            return
+          }
+          if (!worker || !workerReady) {
+            queuedMessages.push(data)
+            return
+          }
+          worker.postMessage(data)
+        }
+
+        function interruptWorker(invocationId) {
+          if (activeInvocationId !== invocationId) return
+          for (let index = queuedMessages.length - 1; index >= 0; index -= 1) {
+            if (queuedMessages[index]?.invocationId === invocationId) queuedMessages.splice(index, 1)
+          }
+          activeInvocationId = null
+          const previousWorker = worker
+          worker = null
+          workerReady = false
+          previousWorker?.terminate()
+          startWorker()
+        }
+
+        window.addEventListener('message', (event) => {
           if (event.source !== parent) return
           const data = event.data
           if (!data || typeof data !== 'object') return
-          if (data.kind === 'initialize' && typeof data.source === 'string' && Array.isArray(data.commandIds)) {
-            capabilities = new Set(Array.isArray(data.capabilities) ? data.capabilities.filter((item) => typeof item === 'string') : [])
-            await loadPlugin(data)
+          if (data.kind === 'initialize' && typeof data.source === 'string' && Array.isArray(data.commandIds) && !initialized) {
+            initialized = true
+            pluginSource = data.source
+            pluginCommandIds = data.commandIds.filter((item) => typeof item === 'string')
+            pluginCapabilities = Array.isArray(data.capabilities)
+              ? data.capabilities.filter((item) => typeof item === 'string')
+              : []
+            startWorker()
             return
           }
-          if (data.kind === 'response' && typeof data.requestId === 'string') {
-            const entry = pending.get(data.requestId)
-            if (!entry) return
-            pending.delete(data.requestId)
-            if (data.success) {
-              if (entry.method === 'show-form') {
-                let responseBytes
-                try {
-                  responseBytes = new TextEncoder().encode(JSON.stringify(data.value)).byteLength
-                } catch {
-                  entry.reject(new Error('The plugin form response is invalid.'))
-                  return
-                }
-                if (responseBytes > maxFormResponseBytes) {
-                  entry.reject(new Error(`The plugin form response exceeds ${maxFormResponseBytes} bytes.`))
-                  return
-                }
-              }
-              entry.resolve(data.value)
-            } else entry.reject(new Error(typeof data.message === 'string' ? data.message : 'The host rejected the plugin request.'))
+          if (data.kind === 'interrupt' && typeof data.invocationId === 'string') {
+            interruptWorker(data.invocationId)
             return
           }
           if (data.kind === 'invoke' && typeof data.commandId === 'string' && typeof data.invocationId === 'string') {
-            const handler = handlers.get(data.commandId)
-            if (!handler) {
-              send({ kind: 'finished', invocationId: data.invocationId, success: false, message: 'The plugin command is not registered.' })
-              return
-            }
-            try {
-              await handler(makeCommandApi(data.invocationId))
-              send({ kind: 'finished', invocationId: data.invocationId, success: true })
-            } catch (error) {
-              send({ kind: 'finished', invocationId: data.invocationId, success: false, message: messageError(error).slice(0, 500) })
-            }
+            activeInvocationId = data.invocationId
+            sendToWorker(data)
+            return
           }
+          if (data.kind === 'response' && typeof data.requestId === 'string') sendToWorker(data)
         })
       })()
     </script>

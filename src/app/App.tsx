@@ -73,6 +73,7 @@ function App({ projectAdapter, pluginRuntimeFactory }: AppProps) {
     }
     if (closePromptRef.current) {
       if (closePromptRef.current.requestId !== requestId) controls.respondToCloseRequest(requestId, 'cancel')
+      else controls.acknowledgeCloseRequest(requestId)
       return
     }
     if (!requiresCloseConfirmation(sessionRef.current)) {
@@ -80,6 +81,7 @@ function App({ projectAdapter, pluginRuntimeFactory }: AppProps) {
       return
     }
     updateClosePrompt({ requestId, message: '' })
+    controls.acknowledgeCloseRequest(requestId)
   }
 
   function handleCloseRequest(requestId: number) {

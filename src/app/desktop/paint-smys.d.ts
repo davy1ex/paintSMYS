@@ -20,6 +20,7 @@ declare global {
         onCloseRequest: (callback: (requestId: number) => void) => () => void
         onCloseRequestFailure: (callback: (request: { requestId: number; message: string }) => void) => () => void
         respondToCloseRequest: (requestId: number, decision: 'allow' | 'cancel') => void
+        acknowledgeCloseRequest: (requestId: number) => void
       }
     }
   }

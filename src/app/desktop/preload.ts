@@ -17,6 +17,9 @@ contextBridge.exposeInMainWorld('paintSMYS', {
     respondToCloseRequest: (requestId: number, decision: 'allow' | 'cancel') => {
       ipcRenderer.send('paintSMYS:close-decision', { requestId, decision })
     },
+    acknowledgeCloseRequest: (requestId: number) => {
+      ipcRenderer.send('paintSMYS:close-acknowledge', requestId)
+    },
     isMaximized: () => ipcRenderer.invoke('paintSMYS:is-maximized') as Promise<boolean>,
     onMaximizedChange: (callback: (maximized: boolean) => void) => {
       const listener = (_event: Electron.IpcRendererEvent, maximized: boolean) => callback(maximized)

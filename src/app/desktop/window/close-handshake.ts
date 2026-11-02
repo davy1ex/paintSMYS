@@ -10,7 +10,7 @@ type CloseHandshakeOptions = {
 /** Bridges Electron's synchronous close event to an asynchronous renderer decision. */
 export class CloseHandshake {
   private requestSequence = 0
-  private pendingRequest: { id: number; timer: ReturnType<typeof setTimeout> } | null = null
+  private pendingRequest: { id: number; timer: ReturnType<typeof setTimeout> | null } | null = null
   private allowNextClose = false
   private readonly timeoutMs: number
 
@@ -42,9 +42,20 @@ export class CloseHandshake {
     return false
   }
 
+  /** Stop the renderer-response watchdog once the renderer has accepted the request. */
+  acknowledge(requestId: number): void {
+    if (this.pendingRequest?.id !== requestId || this.pendingRequest.timer === null) return
+    clearTimeout(this.pendingRequest.timer)
+    this.pendingRequest.timer = null
+  }
+
+  pendingRequestId(): number | null {
+    return this.pendingRequest?.id ?? null
+  }
+
   respond(requestId: number, decision: CloseDecision): void {
     if (this.pendingRequest?.id !== requestId) return
-    clearTimeout(this.pendingRequest.timer)
+    if (this.pendingRequest.timer !== null) clearTimeout(this.pendingRequest.timer)
     this.pendingRequest = null
 
     if (decision === 'cancel') return
@@ -60,7 +71,7 @@ export class CloseHandshake {
 
   private failRequest(requestId: number, message: string): void {
     if (this.pendingRequest?.id !== requestId) return
-    clearTimeout(this.pendingRequest.timer)
+    if (this.pendingRequest.timer !== null) clearTimeout(this.pendingRequest.timer)
     this.pendingRequest = null
     this.notifyFailure(requestId, message)
   }
