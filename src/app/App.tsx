@@ -58,7 +58,11 @@ function App({ projectAdapter }: AppProps) {
     if (!controls) return
 
     const unsubscribeRequest = controls.onCloseRequest((requestId) => {
-      editorWorkspaceRef.current?.commitTextDraft()
+      if (editorWorkspaceRef.current && !editorWorkspaceRef.current.commitPendingEdits()) {
+        setError('Fix or cancel the invalid Inspector value before closing.')
+        controls.respondToCloseRequest(requestId, 'cancel')
+        return
+      }
       if (closePromptRef.current) {
         if (closePromptRef.current.requestId !== requestId) controls.respondToCloseRequest(requestId, 'cancel')
         return
@@ -83,7 +87,11 @@ function App({ projectAdapter }: AppProps) {
   useEffect(() => {
     if (window.paintSMYS) return
     const protectBrowserClose = (event: BeforeUnloadEvent) => {
-      editorWorkspaceRef.current?.commitTextDraft()
+      if (editorWorkspaceRef.current && !editorWorkspaceRef.current.commitPendingEdits()) {
+        event.preventDefault()
+        event.returnValue = ''
+        return
+      }
       if (!requiresCloseConfirmation(sessionRef.current)) return
       event.preventDefault()
       event.returnValue = ''
@@ -243,6 +251,10 @@ function App({ projectAdapter }: AppProps) {
   async function saveAndClose() {
     const request = closePromptRef.current
     if (!request || savingRef.current) return
+    if (editorWorkspaceRef.current && !editorWorkspaceRef.current.commitPendingEdits()) {
+      updateClosePrompt({ ...request, message: 'Fix or cancel the invalid Inspector value before saving.' })
+      return
+    }
     updateClosePrompt({ ...request, message: '' })
     const result = await save('save')
     if (closePromptRef.current?.requestId !== request.requestId) return

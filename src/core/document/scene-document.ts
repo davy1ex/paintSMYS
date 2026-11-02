@@ -56,6 +56,8 @@ export type SceneDocument = {
 
 export type RectangleGeometry = Pick<RectangleObject, 'x' | 'y' | 'width' | 'height'>
 export type ObjectPosition = Pick<RectangleObject, 'x' | 'y'>
+export type RectangleObjectProperties = Partial<Pick<RectangleObject, 'x' | 'y' | 'width' | 'height' | 'fill' | 'stroke' | 'strokeWidth'>>
+export type TextObjectProperties = Partial<Pick<TextObject, 'x' | 'y' | 'fontFamily' | 'fontSize' | 'color'>>
 export type TextObjectContent = Pick<TextObject, 'text'> & Partial<Pick<TextObject, 'fontFamily' | 'fontSize' | 'color' | 'runs'>>
 
 export class DocumentValidationError extends Error {
@@ -208,6 +210,69 @@ export function removeObject(document: SceneDocument, objectId: string): SceneDo
     ...document,
     objects: document.objects.filter((object) => object.id !== objectId),
   })
+}
+
+/** Update only the editable properties of one RectangleObject. */
+export function updateRectangleObjectProperties(
+  document: SceneDocument,
+  objectId: string,
+  properties: RectangleObjectProperties,
+): SceneDocument {
+  const objectIndex = document.objects.findIndex((object) => object.id === objectId)
+  if (objectIndex === -1) {
+    throw new DocumentValidationError(`Object "${objectId}" does not exist.`)
+  }
+
+  const object = document.objects[objectIndex]
+  if (object.type !== 'rectangle') {
+    throw new DocumentValidationError(`Object "${objectId}" is not a rectangle object.`)
+  }
+
+  const updatedObject = { ...object, ...properties }
+  if (
+    updatedObject.x === object.x && updatedObject.y === object.y &&
+    updatedObject.width === object.width && updatedObject.height === object.height &&
+    updatedObject.fill === object.fill && updatedObject.stroke === object.stroke &&
+    updatedObject.strokeWidth === object.strokeWidth
+  ) {
+    validateSceneDocument(document)
+    return document
+  }
+
+  const objects = document.objects.slice()
+  objects[objectIndex] = updatedObject
+  return validateSceneDocument({ ...document, objects })
+}
+
+/** Update one TextObject's base properties while preserving its source text and styled runs. */
+export function updateTextObjectProperties(
+  document: SceneDocument,
+  objectId: string,
+  properties: TextObjectProperties,
+): SceneDocument {
+  const objectIndex = document.objects.findIndex((object) => object.id === objectId)
+  if (objectIndex === -1) {
+    throw new DocumentValidationError(`Object "${objectId}" does not exist.`)
+  }
+
+  const object = document.objects[objectIndex]
+  if (object.type !== 'text') {
+    throw new DocumentValidationError(`Object "${objectId}" is not a text object.`)
+  }
+
+  const updatedObject = { ...object, ...properties }
+  if (
+    updatedObject.x === object.x && updatedObject.y === object.y &&
+    updatedObject.fontFamily === object.fontFamily && updatedObject.fontSize === object.fontSize &&
+    updatedObject.color === object.color
+  ) {
+    validateSceneDocument(document)
+    return document
+  }
+
+  const objects = document.objects.slice()
+  objects[objectIndex] = updatedObject
+  return validateSceneDocument({ ...document, objects })
 }
 
 export function updateTextObject(document: SceneDocument, objectId: string, text: string): SceneDocument {

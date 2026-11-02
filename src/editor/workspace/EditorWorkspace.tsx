@@ -1,9 +1,10 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from 'react'
-import { addRectangle, addTextObject, DEFAULT_TEXT_FONT_SIZE, MAX_TEXT_LENGTH, moveObject, removeObject, updateTextObject, type RectangleGeometry, type SceneDocument, type SceneObject } from '../../core/document/scene-document'
+import { addRectangle, addTextObject, DEFAULT_TEXT_FONT_SIZE, MAX_TEXT_LENGTH, moveObject, removeObject, updateRectangleObjectProperties, updateTextObject, updateTextObjectProperties, type RectangleGeometry, type RectangleObjectProperties, type SceneDocument, type SceneObject, type TextObjectProperties } from '../../core/document/scene-document'
 import type { ProjectSession } from '../../application/project-session'
 import type { ProjectSaveMode } from '../../application/project-save-port'
 import { findTopmostObjectAtPoint, getSceneObjectBounds, isGestureLongEnough, normalizeRectangle, transformPoint, transformVector, translateRectangle, type NormalizedRectangle, type Point } from './rectangle-geometry'
 import EditorMenuBar from './EditorMenuBar'
+import PropertyInspector, { type PropertyInspectorHandle } from './PropertyInspector'
 import { SceneSvgContent } from './SceneSvgContent'
 import ToolPanel from './ToolPanel'
 import './editor-workspace.css'
@@ -11,7 +12,7 @@ import './editor-workspace.css'
 type ActiveTool = 'select' | 'rectangle' | 'text'
 
 export type EditorWorkspaceHandle = {
-  commitTextDraft: () => boolean
+  commitPendingEdits: () => boolean
 }
 
 type EditorWorkspaceProps = {
@@ -129,6 +130,8 @@ const EditorWorkspace = forwardRef<EditorWorkspaceHandle, EditorWorkspaceProps>(
   const gestureRef = useRef<EditorGesture | null>(null)
   const textDraftRef = useRef<TextDraft | null>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const inspectorRef = useRef<PropertyInspectorHandle>(null)
+  const documentRef = useRef(session.document)
   const pointerClientRef = useRef<Point | null>(null)
   const [viewportSize, setViewportSize] = useState({ width: 0, height: 0 })
   const [mockActionMessage, setMockActionMessage] = useState('')
@@ -140,6 +143,7 @@ const EditorWorkspace = forwardRef<EditorWorkspaceHandle, EditorWorkspaceProps>(
   const [selectedObjectId, setSelectedObjectId] = useState<string | null>(null)
   const [textDraft, setTextDraft] = useState<TextDraft | null>(null)
   const { document } = session
+  documentRef.current = document
   const { artboard } = document
   const fitScale = Math.min(
     viewportSize.width / artboard.width || 0,
@@ -163,22 +167,47 @@ const EditorWorkspace = forwardRef<EditorWorkspaceHandle, EditorWorkspaceProps>(
     setTextDraft(nextDraft)
   }
 
+  function publishDocumentChange(nextDocument: SceneDocument) {
+    const previousDocument = documentRef.current
+    if (previousDocument === nextDocument) return
+    documentRef.current = nextDocument
+    onDocumentChange(previousDocument, nextDocument)
+  }
+
+  function updateRectangleProperties(objectId: string, properties: RectangleObjectProperties): string | null {
+    try {
+      publishDocumentChange(updateRectangleObjectProperties(documentRef.current, objectId, properties))
+      return null
+    } catch (error) {
+      return error instanceof Error ? error.message : 'The Rectangle property is invalid.'
+    }
+  }
+
+  function updateTextProperties(objectId: string, properties: TextObjectProperties): string | null {
+    try {
+      publishDocumentChange(updateTextObjectProperties(documentRef.current, objectId, properties))
+      return null
+    } catch (error) {
+      return error instanceof Error ? error.message : 'The Text property is invalid.'
+    }
+  }
+
   function commitTextDraft(): boolean {
     const draft = textDraftRef.current
-    if (!draft) return false
+    if (!draft) return true
     setActiveTextDraft(null)
 
     if (draft.mode === 'create') {
       if (!draft.text.trim()) return true
-      const nextDocument = addTextObject(document, { x: draft.x, y: draft.y, text: draft.text })
+      const nextDocument = addTextObject(documentRef.current, { x: draft.x, y: draft.y, text: draft.text })
       const created = nextDocument.objects[nextDocument.objects.length - 1]
       setSelectedObjectId(created.id)
-      onDocumentChange(document, nextDocument)
+      publishDocumentChange(nextDocument)
       return true
     }
 
     if (draft.objectId && draft.text !== draft.originalText) {
-      onDocumentChange(document, updateTextObject(document, draft.objectId, draft.text))
+      publishDocumentChange(updateTextObject(documentRef.current, draft.objectId, draft.text))
     }
     if (draft.objectId) setSelectedObjectId(draft.objectId)
     return true
@@ -191,7 +220,7 @@ const EditorWorkspace = forwardRef<EditorWorkspaceHandle, EditorWorkspaceProps>(
     setSelectedObjectId(draft.mode === 'edit' ? draft.objectId ?? null : null)
   }
 
-  useImperativeHandle(ref, () => ({ commitTextDraft }), [document, onDocumentChange])
+  useImperativeHandle(ref, () => ({ commitPendingEdits }), [document, onDocumentChange])
 
   useEffect(() => {
     const element = canvasRef.current
@@ -208,29 +237,41 @@ const EditorWorkspace = forwardRef<EditorWorkspaceHandle, EditorWorkspaceProps>(
   }, [Boolean(textDraft)])
 
   function handleSave(mode: ProjectSaveMode = 'save') {
-    commitTextDraft()
+    if (!commitPendingEdits()) return
     onSave(mode)
   }
 
   function handleSaveAs() {
-    commitTextDraft()
+    if (!commitPendingEdits()) return
     onSaveAs()
   }
 
   function handleExportPng() {
-    commitTextDraft()
+    if (!commitPendingEdits()) return
     onExportPng()
+  }
+
+  function commitPendingEdits(): boolean {
+    if (inspectorRef.current && !inspectorRef.current.commitPendingEdits()) return false
+    return commitTextDraft()
   }
 
   useEffect(() => {
     const handleShortcut = (event: KeyboardEvent) => {
       if (
         isClosePromptOpen || globalThis.document.querySelector('dialog[open]') ||
-        isEditableTarget(event.target) || event.altKey || event.isComposing
+        event.altKey || event.isComposing
       ) return
       if (event.ctrlKey === event.metaKey) return
 
       const key = event.key.toLowerCase()
+      if (canSave && !event.shiftKey && (event.ctrlKey || event.metaKey) && key === 's') {
+        event.preventDefault()
+        if (!isSaving) handleSave()
+        return
+      }
+      if (isEditableTarget(event.target)) return
+
       // `key` changes with the selected layout; `code` identifies the physical key.
       const isZKey = event.code === 'KeyZ' || key === 'z' || key === 'я'
       const isYKey = event.code === 'KeyY' || key === 'y' || key === 'н'
@@ -249,14 +290,10 @@ const EditorWorkspace = forwardRef<EditorWorkspaceHandle, EditorWorkspaceProps>(
         onRedo()
         return
       }
-      if (canSave && !event.shiftKey && (event.ctrlKey || event.metaKey) && key === 's') {
-        event.preventDefault()
-        if (!isSaving) handleSave()
-      }
     }
     globalThis.document.addEventListener('keydown', handleShortcut)
     return () => globalThis.document.removeEventListener('keydown', handleShortcut)
-  }, [canRedo, canSave, canUndo, commitTextDraft, isClosePromptOpen, isSaving, onRedo, onSave, onUndo])
+  }, [canRedo, canSave, canUndo, commitPendingEdits, isClosePromptOpen, isSaving, onRedo, onSave, onUndo])
 
   useEffect(() => {
     const updateHover = (clientPoint: Point, objects: SceneObject[] = document.objects) => {
@@ -715,22 +752,13 @@ const EditorWorkspace = forwardRef<EditorWorkspaceHandle, EditorWorkspaceProps>(
           </div>
           <div className="editor-stage__footer"><span>{zoomLabel}</span><span>{document.objects.length} objects</span></div>
         </section>
-        <aside className="property-inspector" aria-label="Property Inspector">
-          <div className="inspector-title">Scene Properties</div>
-          <div className="inspector-section-label">ARTBOARD</div>
-          <dl className="inspector-list">
-            <div><dt>Width</dt><dd>{artboard.width} px</dd></div>
-            <div><dt>Height</dt><dd>{artboard.height} px</dd></div>
-            <div><dt>Background</dt><dd><span className="color-chip" style={{ backgroundColor: artboard.backgroundColor }} />{artboard.backgroundColor}</dd></div>
-          </dl>
-          <div className="inspector-divider" />
-          <div className="inspector-section-label">SCENE</div>
-          <dl className="inspector-list">
-            <div><dt>Objects</dt><dd>{document.objects.length}</dd></div>
-            <div><dt>Scene ID</dt><dd className="inspector-id" title={document.id}>{document.id.slice(0, 8)}…</dd></div>
-          </dl>
-          <div className="inspector-empty">Select an object to inspect its properties.</div>
-        </aside>
+        <PropertyInspector
+          ref={inspectorRef}
+          document={document}
+          selectedObject={selectedObject}
+          onRectangleChange={updateRectangleProperties}
+          onTextChange={updateTextProperties}
+        />
       </div>
       <footer className="editor-statusbar">
         <span>{session.projectRoot ? 'Project opened from folder' : session.isDirty ? 'Project folder not set' : 'Opened in browser'}</span>

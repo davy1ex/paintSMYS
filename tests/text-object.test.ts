@@ -15,10 +15,12 @@ import {
   removeObject,
   setTextRuns,
   updateTextObject,
+  updateTextObjectProperties,
   validateSceneDocument,
 } from '../src/core/document/scene-document'
 import { createProjectManifest, serializeProjectManifest } from '../src/core/project/project-manifest'
 import { findTopmostObjectAtPoint, getTextObjectBounds, transformPoint } from '../src/editor/workspace/rectangle-geometry'
+import { renderSceneSvg } from '../src/editor/workspace/scene-svg-serialization'
 
 test('addTextObject creates an immutable multiline Unicode object with defaults and preserves rectangles', () => {
   const original = addRectangle(createSceneDocument(800, 600), { x: 10, y: 20, width: 80, height: 40 })
@@ -202,6 +204,59 @@ test('text geometry uses the same top-left anchor at every SVG scale and hit-tes
   assert.equal(findTopmostObjectAtPoint(withText.objects, { x: 115, y: 115 }), textObject.id)
   assert.equal(findTopmostObjectAtPoint(withText.objects, { x: 115, y: 115 }, { x: 0, y: 0 }), textObject.id)
   assert.equal(findTopmostObjectAtPoint(withText.objects, { x: 300, y: 300 }), null)
+})
+
+test('Text base properties preserve styled runs and update rendering geometry and hit testing', () => {
+  const withRectangle = addRectangle(createSceneDocument(800, 600), { x: 5, y: 6, width: 20, height: 30 })
+  const source = addTextObject(withRectangle, {
+    x: 100,
+    y: 100,
+    text: 'abcd\nxy',
+    runs: [{ start: 1, end: 3, color: '#cc0000' }],
+  })
+  const [rectangle, textObject] = source.objects
+  if (textObject.type !== 'text') assert.fail('Expected a text object')
+  const before = structuredClone(source)
+  const edited = updateTextObjectProperties(source, textObject.id, {
+    x: 110,
+    y: 120,
+    fontFamily: 'Arial',
+    fontSize: 24,
+    color: '#0000cc',
+  })
+  const editedText = edited.objects[1]
+  if (editedText.type !== 'text') assert.fail('Expected a text object')
+
+  assert.deepEqual(source, before)
+  assert.deepEqual(edited.objects[0], rectangle)
+  assert.equal(editedText.text, textObject.text)
+  assert.deepEqual(editedText.runs, textObject.runs)
+  assert.deepEqual(
+    { x: editedText.x, y: editedText.y, fontFamily: editedText.fontFamily, fontSize: editedText.fontSize, color: editedText.color },
+    { x: 110, y: 120, fontFamily: 'Arial', fontSize: 24, color: '#0000cc' },
+  )
+  assert.deepEqual(getTextObjectBounds(editedText), { x: 110, y: 120, width: 57.599999999999994, height: 57.599999999999994 })
+  assert.equal(findTopmostObjectAtPoint(edited.objects, { x: 150, y: 145 }), textObject.id)
+  const svg = renderSceneSvg(edited)
+  assert.match(svg, /font-family="Arial, monospace"/)
+  assert.match(svg, /font-size="24"/)
+  assert.match(svg, /fill="#0000cc"/)
+  assert.match(svg, /<tspan fill="#cc0000">bc<\/tspan>/)
+
+  const history = new DocumentHistory(source)
+  assert.equal(history.recordChange(source, edited), true)
+  assert.equal(history.recordChange(edited, updateTextObjectProperties(edited, textObject.id, { fontSize: 24 })), false)
+  assert.equal(history.undo(edited), source)
+  assert.equal(history.redo(source), edited)
+
+  assert.throws(() => updateTextObjectProperties(source, textObject.id, { fontSize: 0 }), DocumentValidationError)
+  assert.throws(() => updateTextObjectProperties(source, textObject.id, { fontSize: 1_025 }), DocumentValidationError)
+  assert.throws(() => updateTextObjectProperties(source, textObject.id, { fontFamily: '   ' }), DocumentValidationError)
+  assert.throws(() => updateTextObjectProperties(source, textObject.id, { color: 'javascript:alert(1)' }), DocumentValidationError)
+  assert.throws(() => updateTextObjectProperties(source, textObject.id, { x: Number.NaN }), DocumentValidationError)
+  assert.throws(() => updateTextObjectProperties(source, 'missing', { x: 1 }), /does not exist/)
+  assert.throws(() => updateTextObjectProperties(source, rectangle.id, { x: 1 }), /not a text object/)
+  assert.deepEqual(source, before)
 })
 
 test('old rectangle-only project manifests remain readable with their original shape', () => {

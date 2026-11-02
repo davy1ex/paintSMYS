@@ -5,9 +5,10 @@ import { join } from 'node:path'
 import { test } from 'node:test'
 import { saveProjectAsFolder, saveExistingProjectFolder, readProjectFolder } from '../src/app/desktop/project-storage'
 import { mergeSavedProjectSession, saveProjectSession } from '../src/application/save-project-session'
+import { DocumentHistory } from '../src/application/document-history'
 import type { ProjectSavePort, ProjectSaveRequest } from '../src/application/project-save-port'
 import { createUntitledProjectSession, openProjectSession, updateProjectSessionDocument, type ProjectSession } from '../src/application/project-session'
-import { addRectangle, addTextObject, moveObject, removeObject } from '../src/core/document/scene-document'
+import { addRectangle, addTextObject, moveObject, removeObject, updateRectangleObjectProperties, updateTextObjectProperties } from '../src/core/document/scene-document'
 import { parseProjectManifest } from '../src/core/project/project-manifest'
 
 async function withTempDirectory(run: (directory: string) => Promise<void>) {
@@ -150,6 +151,79 @@ test('Save and Open restore a moved Rectangle position', async () => {
     assert.deepEqual(reopened.document.objects, moved.objects)
     assert.equal(reopened.document.objects[0].x, 140)
     assert.equal(reopened.document.objects[0].y, -35)
+  })
+})
+
+test('edited Rectangle and Text properties save and reopen with their exact values and Styled Text runs', async () => {
+  await withTempDirectory(async (directory) => {
+    const target = join(directory, 'Edited properties')
+    const initialSession = createUntitledProjectSession(800, 600)
+    const withRectangle = addRectangle(initialSession.document, { x: 10, y: 20, width: 80, height: 40 })
+    const withObjects = addTextObject(withRectangle, {
+      x: 100,
+      y: 120,
+      text: 'styled text',
+      runs: [{ start: 0, end: 6, color: '#cc0000' }],
+    })
+    const rectangle = withObjects.objects[0]
+    const text = withObjects.objects[1]
+    if (text.type !== 'text') assert.fail('Expected a Text object')
+    const history = new DocumentHistory(withObjects)
+    const rectangleEdited = updateRectangleObjectProperties(withObjects, rectangle.id, {
+      x: 30,
+      y: 45,
+      width: 500,
+      height: 250,
+      fill: '#abc',
+      stroke: '#112233',
+      strokeWidth: 4,
+    })
+    history.recordChange(withObjects, rectangleEdited)
+    const edited = updateTextObjectProperties(rectangleEdited, text.id, {
+      x: 210,
+      y: 230,
+      fontFamily: 'Arial',
+      fontSize: 36,
+      color: '#0000cc',
+    })
+    history.recordChange(rectangleEdited, edited)
+    assert.equal(history.isDirty(edited), true)
+
+    const editedSession = updateProjectSessionDocument(
+      { ...initialSession, document: withObjects, isDirty: false },
+      edited,
+      history.isDirty(edited),
+    )
+    const saved = await saveProjectSession(editedSession, diskSavePort(target), 'save-as')
+    assert.equal(saved.status, 'saved')
+    if (saved.status !== 'saved') return
+    assert.equal(saved.session.isDirty, false)
+    history.markSaved(edited)
+    assert.equal(history.undo(edited), rectangleEdited)
+    assert.equal(history.isDirty(rectangleEdited), true)
+    assert.equal(history.redo(rectangleEdited), edited)
+    assert.equal(history.isDirty(edited), false)
+
+    const reopened = openProjectSession((await readProjectFolder(target)).manifestText, target)
+    assert.equal(reopened.isDirty, false)
+    assert.deepEqual(reopened.document.objects, edited.objects)
+    assert.deepEqual(reopened.document.objects[0], {
+      ...rectangle,
+      x: 30,
+      y: 45,
+      width: 500,
+      height: 250,
+      fill: '#abc',
+      stroke: '#112233',
+      strokeWidth: 4,
+    })
+    const reopenedText = reopened.document.objects[1]
+    if (reopenedText.type !== 'text') assert.fail('Expected the reopened object to remain text')
+    assert.equal(reopenedText.text, 'styled text')
+    assert.equal(reopenedText.fontFamily, 'Arial')
+    assert.equal(reopenedText.fontSize, 36)
+    assert.equal(reopenedText.color, '#0000cc')
+    assert.deepEqual(reopenedText.runs, [{ start: 0, end: 6, color: '#cc0000' }])
   })
 })
 

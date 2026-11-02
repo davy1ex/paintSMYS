@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { addRectangle, createSceneDocument, DocumentValidationError, moveObject, removeObject } from '../src/core/document/scene-document'
+import { addRectangle, addTextObject, createSceneDocument, DocumentValidationError, moveObject, removeObject, updateRectangleObjectProperties } from '../src/core/document/scene-document'
 
 test('addRectangle returns a valid immutable scene and preserves object order', () => {
   const original = createSceneDocument(800, 600)
@@ -94,4 +94,36 @@ test('moveObject returns the original document for a no-op', () => {
   const rectangle = original.objects[0]
 
   assert.equal(moveObject(original, rectangle.id, { x: rectangle.x, y: rectangle.y }), original)
+})
+
+test('Rectangle property edits are immutable, preserve other objects and validate final dimensions and colors', () => {
+  const withRectangle = addRectangle(createSceneDocument(800, 600), { x: 10, y: 20, width: 80, height: 40 })
+  const original = addRectangle(withRectangle, { x: 120, y: 140, width: 50, height: 30 })
+  const before = structuredClone(original)
+  const [rectangle, other] = original.objects
+
+  const edited = updateRectangleObjectProperties(original, rectangle.id, {
+    x: -5,
+    y: 75,
+    width: 500,
+    height: 250,
+    fill: '#abc',
+    stroke: '#112233',
+    strokeWidth: 3,
+  })
+
+  assert.deepEqual(original, before)
+  assert.deepEqual(edited.objects.map((object) => object.id), [rectangle.id, other.id])
+  assert.deepEqual(edited.objects[0], { ...rectangle, x: -5, y: 75, width: 500, height: 250, fill: '#abc', stroke: '#112233', strokeWidth: 3 })
+  assert.deepEqual(edited.objects[1], other)
+  assert.equal(updateRectangleObjectProperties(edited, rectangle.id, { width: 500 }), edited)
+  assert.throws(() => updateRectangleObjectProperties(original, rectangle.id, { width: 0 }), DocumentValidationError)
+  assert.throws(() => updateRectangleObjectProperties(original, rectangle.id, { height: -1 }), DocumentValidationError)
+  assert.throws(() => updateRectangleObjectProperties(original, rectangle.id, { fill: 'url(javascript:alert(1))' }), DocumentValidationError)
+  assert.throws(() => updateRectangleObjectProperties(original, rectangle.id, { stroke: 'invalid' }), DocumentValidationError)
+  assert.throws(() => updateRectangleObjectProperties(original, rectangle.id, { strokeWidth: -1 }), DocumentValidationError)
+  assert.throws(() => updateRectangleObjectProperties(original, 'missing', { x: 1 }), /does not exist/)
+  const withText = addTextObject(original, { x: 1, y: 2, text: 'text' })
+  assert.throws(() => updateRectangleObjectProperties(withText, withText.objects[2].id, { x: 1 }), /not a rectangle object/)
+  assert.deepEqual(original, before)
 })
