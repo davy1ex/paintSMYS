@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
-import { openProjectSession, createUntitledProjectSession, type ProjectSession } from '../application/project-session'
+import { openProjectSession, createUntitledProjectSession, updateProjectSessionDocument, type ProjectSession } from '../application/project-session'
 import { canCloseAfterSave, requiresCloseConfirmation } from '../application/project-close-policy'
 import type { ProjectOpenPort } from '../application/project-open-port'
 import type { ProjectSaveMode, ProjectSavePort } from '../application/project-save-port'
 import type { SaveProjectSessionResult } from '../application/save-project-session'
+import type { SceneDocument } from '../core/document/scene-document'
 import { mergeSavedProjectSession, saveProjectSession } from '../application/save-project-session'
 import EditorWorkspace from '../editor/workspace/EditorWorkspace'
 import CloseProjectDialog, { type ClosePrompt } from './CloseProjectDialog'
@@ -104,6 +105,12 @@ function App({ projectAdapter }: AppProps) {
     setActiveSession(createUntitledProjectSession(width, height))
   }
 
+  function updateDocument(sourceProjectId: string, sourceDocumentId: string, document: SceneDocument) {
+    const current = sessionRef.current
+    if (!current || current.projectId !== sourceProjectId || current.document.id !== sourceDocumentId) return
+    setActiveSession(updateProjectSessionDocument(current, document))
+  }
+
   async function save(mode: ProjectSaveMode = 'save'): Promise<SaveProjectSessionResult | null> {
     if (!projectAdapter.saveProject || savingRef.current) return null
     const snapshot = sessionRef.current
@@ -182,6 +189,7 @@ function App({ projectAdapter }: AppProps) {
           statusMessage={error ?? statusMessage}
           onSave={() => void save('save')}
           onSaveAs={() => void save('save-as')}
+          onDocumentChange={(document) => updateDocument(session.projectId, session.document.id, document)}
         />
         <CloseProjectDialog
           request={closePrompt}

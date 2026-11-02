@@ -6,7 +6,8 @@ import { test } from 'node:test'
 import { saveProjectAsFolder, saveExistingProjectFolder, readProjectFolder } from '../src/app/desktop/project-storage'
 import { mergeSavedProjectSession, saveProjectSession } from '../src/application/save-project-session'
 import type { ProjectSavePort, ProjectSaveRequest } from '../src/application/project-save-port'
-import { createUntitledProjectSession, openProjectSession, type ProjectSession } from '../src/application/project-session'
+import { createUntitledProjectSession, openProjectSession, updateProjectSessionDocument, type ProjectSession } from '../src/application/project-session'
+import { addRectangle } from '../src/core/document/scene-document'
 import { parseProjectManifest } from '../src/core/project/project-manifest'
 
 async function withTempDirectory(run: (directory: string) => Promise<void>) {
@@ -59,27 +60,30 @@ test('New 1920×1080 project saves to a project folder and restores the Scene ID
   })
 })
 
-test('Save As writes a Rectangle scene, then Open restores the supported manifest data', async () => {
+test('New Project draws one Rectangle, becomes dirty, then Save and Open restore its full data', async () => {
   await withTempDirectory(async (directory) => {
     const parent = join(directory, 'projects')
     await mkdir(parent)
     const target = join(parent, 'Rectangle scene')
     const session = createUntitledProjectSession(1920, 1080)
-    const rectangle = {
-      id: 'rectangle-1', type: 'rectangle' as const, x: 10, y: 20, width: 80, height: 40,
-      fill: '#ff0000', stroke: '#000000', strokeWidth: 2,
-    }
-    const withRectangle: ProjectSession = {
-      ...session,
-      document: { ...session.document, objects: [rectangle] },
-    }
+    const documentWithRectangle = addRectangle(session.document, { x: 10, y: 20, width: 80, height: 40 })
+    const withRectangle = updateProjectSessionDocument(session, documentWithRectangle)
+    const rectangle = documentWithRectangle.objects[0]
+    assert.equal(withRectangle.isDirty, true)
+    assert.equal(session.document.objects.length, 0)
 
-    const result = await saveProjectSession(withRectangle, diskSavePort(target), 'save-as')
+    const result = await saveProjectSession(withRectangle, diskSavePort(target))
     assert.equal(result.status, 'saved')
     const { manifestText } = await readProjectFolder(target)
     const opened = openProjectSession(manifestText, target)
     assert.deepEqual(opened.document.objects, [rectangle])
     assert.equal(opened.document.id, session.document.id)
+    assert.equal(opened.isDirty, false)
+    assert.equal(opened.document.objects[0].id, rectangle.id)
+    assert.deepEqual(
+      (({ x, y, width, height, fill, stroke, strokeWidth }) => ({ x, y, width, height, fill, stroke, strokeWidth }))(opened.document.objects[0]),
+      { x: 10, y: 20, width: 80, height: 40, fill: '#ffffff', stroke: '#000000', strokeWidth: 1 },
+    )
   })
 })
 

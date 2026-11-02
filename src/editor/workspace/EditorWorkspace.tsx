@@ -1,6 +1,8 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
+import { addRectangle, type RectangleGeometry, type SceneDocument } from '../../core/document/scene-document'
 import type { ProjectSession } from '../../application/project-session'
 import type { ProjectSaveMode } from '../../application/project-save-port'
+import { isGestureLongEnough, normalizeRectangle, transformPoint, type NormalizedRectangle, type Point } from './rectangle-geometry'
 import EditorMenuBar from './EditorMenuBar'
 import ToolPanel from './ToolPanel'
 import './editor-workspace.css'
@@ -14,13 +16,31 @@ type EditorWorkspaceProps = {
   statusMessage: string
   onSave: (mode?: ProjectSaveMode) => void
   onSaveAs: () => void
+  onDocumentChange: (document: SceneDocument) => void
 }
 
-function EditorWorkspace({ session, canSave, isSaving, statusMessage, onSave, onSaveAs }: EditorWorkspaceProps) {
+type RectangleGesture = {
+  pointerId: number
+  pointerType: string
+  startArtboard: Point
+  startClient: Point
+  lastClient: Point
+}
+
+function pointerToArtboard(svg: SVGSVGElement, point: Point): Point | null {
+  const screenTransform = svg.getScreenCTM()
+  if (!screenTransform) return null
+  return transformPoint(point, screenTransform.inverse())
+}
+
+function EditorWorkspace({ session, canSave, isSaving, statusMessage, onSave, onSaveAs, onDocumentChange }: EditorWorkspaceProps) {
   const canvasRef = useRef<HTMLDivElement>(null)
+  const svgRef = useRef<SVGSVGElement>(null)
+  const gestureRef = useRef<RectangleGesture | null>(null)
   const [viewportSize, setViewportSize] = useState({ width: 0, height: 0 })
   const [mockActionMessage, setMockActionMessage] = useState('')
   const [activeTool, setActiveTool] = useState<ActiveTool>('select')
+  const [preview, setPreview] = useState<NormalizedRectangle | null>(null)
   const { document } = session
   const { artboard } = document
   const fitScale = Math.min(
@@ -53,6 +73,107 @@ function EditorWorkspace({ session, canSave, isSaving, statusMessage, onSave, on
     return () => globalThis.document.removeEventListener('keydown', handleShortcut)
   }, [canSave, isSaving, onSave])
 
+  useEffect(() => {
+    const updatePreview = (clientX: number, clientY: number, pointerId?: number) => {
+      const gesture = gestureRef.current
+      const svg = svgRef.current
+      if (!gesture || !svg || (pointerId !== undefined && gesture.pointerId !== pointerId)) return
+      if (gesture.lastClient.x === clientX && gesture.lastClient.y === clientY) return
+      gesture.lastClient = { x: clientX, y: clientY }
+      const end = pointerToArtboard(svg, { x: clientX, y: clientY })
+      if (end) setPreview(normalizeRectangle(gesture.startArtboard, end))
+    }
+
+    const finishGesture = (clientX: number, clientY: number, pointerId?: number) => {
+      const gesture = gestureRef.current
+      const svg = svgRef.current
+      if (!gesture || !svg || (pointerId !== undefined && gesture.pointerId !== pointerId)) return
+      const end = pointerToArtboard(svg, { x: clientX, y: clientY })
+      gestureRef.current = null
+      setPreview(null)
+      if (!end || !isGestureLongEnough(gesture.startClient, { x: clientX, y: clientY })) return
+
+      const rectangle: RectangleGeometry = normalizeRectangle(gesture.startArtboard, end)
+      if (rectangle.width <= 0 || rectangle.height <= 0 || !Object.values(rectangle).every(Number.isFinite)) return
+      onDocumentChange(addRectangle(document, rectangle))
+    }
+
+    const handlePointerMove = (event: PointerEvent) => {
+      updatePreview(event.clientX, event.clientY, event.pointerId)
+    }
+
+    const handleMouseMove = (event: MouseEvent) => {
+      if (gestureRef.current?.pointerType !== 'mouse') return
+      updatePreview(event.clientX, event.clientY)
+    }
+
+    const handlePointerUp = (event: PointerEvent) => {
+      finishGesture(event.clientX, event.clientY, event.pointerId)
+    }
+
+    const handleMouseUp = (event: MouseEvent) => {
+      if (gestureRef.current?.pointerType !== 'mouse') return
+      finishGesture(event.clientX, event.clientY)
+    }
+
+    const handlePointerCancel = (event: PointerEvent) => {
+      if (gestureRef.current?.pointerId !== event.pointerId) return
+      gestureRef.current = null
+      setPreview(null)
+    }
+
+    // Listen at window level so the captured drag keeps updating even when the
+    // pointer leaves the SVG. Mouse drags use mouse events; pen and touch use pointers.
+    globalThis.window.addEventListener('pointermove', handlePointerMove, true)
+    globalThis.window.addEventListener('pointerup', handlePointerUp, true)
+    globalThis.window.addEventListener('pointercancel', handlePointerCancel, true)
+    globalThis.window.addEventListener('mousemove', handleMouseMove, true)
+    globalThis.window.addEventListener('mouseup', handleMouseUp, true)
+    return () => {
+      globalThis.window.removeEventListener('pointermove', handlePointerMove, true)
+      globalThis.window.removeEventListener('pointerup', handlePointerUp, true)
+      globalThis.window.removeEventListener('pointercancel', handlePointerCancel, true)
+      globalThis.window.removeEventListener('mousemove', handleMouseMove, true)
+      globalThis.window.removeEventListener('mouseup', handleMouseUp, true)
+    }
+  }, [document, onDocumentChange])
+
+  useEffect(() => {
+    const cancelDrawing = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return
+      const gesture = gestureRef.current
+      if (!gesture) return
+      event.preventDefault()
+      gestureRef.current = null
+      setPreview(null)
+      const svg = svgRef.current
+      if (svg?.hasPointerCapture(gesture.pointerId)) svg.releasePointerCapture(gesture.pointerId)
+    }
+    globalThis.document.addEventListener('keydown', cancelDrawing)
+    return () => globalThis.document.removeEventListener('keydown', cancelDrawing)
+  }, [])
+
+  useEffect(() => {
+    if (activeTool === 'rectangle') return
+    const gesture = gestureRef.current
+    if (!gesture) return
+    gestureRef.current = null
+    setPreview(null)
+    const svg = svgRef.current
+    if (svg?.hasPointerCapture(gesture.pointerId)) svg.releasePointerCapture(gesture.pointerId)
+  }, [activeTool])
+
+  function handlePointerDown(event: ReactPointerEvent<SVGSVGElement>) {
+    if (activeTool !== 'rectangle' || event.button !== 0) return
+    const startClient = { x: event.clientX, y: event.clientY }
+    const startArtboard = pointerToArtboard(event.currentTarget, startClient)
+    if (!startArtboard) return
+
+    gestureRef.current = { pointerId: event.pointerId, pointerType: event.pointerType, startArtboard, startClient, lastClient: startClient }
+    setPreview(null)
+    event.currentTarget.setPointerCapture(event.pointerId)
+  }
+
   return (
     <main className="editor-shell">
       <EditorMenuBar
@@ -74,11 +195,18 @@ function EditorWorkspace({ session, canSave, isSaving, statusMessage, onSave, on
         <section className="editor-stage" aria-label="Artboard workspace">
           <div className="editor-canvas-wrap" ref={canvasRef}>
             <div
-              className="editor-artboard"
+              className={`editor-artboard${activeTool === 'rectangle' ? ' editor-artboard--drawing' : ''}`}
               aria-label={`Artboard ${artboard.width} by ${artboard.height} pixels`}
               style={{ width: boardWidth, height: boardHeight }}
             >
-              <svg className="scene-svg" viewBox={`0 0 ${artboard.width} ${artboard.height}`} role="img" aria-label="Scene contents">
+              <svg
+                ref={svgRef}
+                className="scene-svg"
+                viewBox={`0 0 ${artboard.width} ${artboard.height}`}
+                role="img"
+                aria-label="Scene contents"
+                onPointerDown={handlePointerDown}
+              >
                 <rect width={artboard.width} height={artboard.height} fill={artboard.backgroundColor} />
                 {document.objects.map((object) => (
                   <rect
@@ -92,6 +220,20 @@ function EditorWorkspace({ session, canSave, isSaving, statusMessage, onSave, on
                     strokeWidth={object.strokeWidth}
                   />
                 ))}
+                {preview && preview.width > 0 && preview.height > 0 && (
+                  <rect
+                    x={preview.x}
+                    y={preview.y}
+                    width={preview.width}
+                    height={preview.height}
+                    fill="#000080"
+                    fillOpacity={0.12}
+                    stroke="#000080"
+                    strokeDasharray="4 3"
+                    pointerEvents="none"
+                    aria-hidden="true"
+                  />
+                )}
               </svg>
             </div>
           </div>

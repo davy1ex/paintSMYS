@@ -29,6 +29,8 @@ export type SceneDocument = {
   objects: SceneObject[]
 }
 
+export type RectangleGeometry = Pick<RectangleObject, 'x' | 'y' | 'width' | 'height'>
+
 export class DocumentValidationError extends Error {
   constructor(message: string) {
     super(message)
@@ -72,6 +74,27 @@ export function createSceneDocument(width: number, height: number): SceneDocumen
     artboard: { width, height, backgroundColor: '#ffffff' },
     objects: [],
   }
+}
+
+export function addRectangle(document: SceneDocument, geometry: RectangleGeometry): SceneDocument {
+  const existingIds = new Set(document.objects.map((object) => object.id))
+  let id = createId()
+  while (existingIds.has(id)) id = createId()
+
+  return validateSceneDocument({
+    ...document,
+    objects: [
+      ...document.objects,
+      {
+        id,
+        type: 'rectangle',
+        ...geometry,
+        fill: '#ffffff',
+        stroke: '#000000',
+        strokeWidth: 1,
+      },
+    ],
+  })
 }
 
 export function validateSceneDocument(value: unknown): SceneDocument {

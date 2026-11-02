@@ -29,3 +29,11 @@ export function openProjectSession(manifestText: string, projectRoot: string | n
     isDirty: false,
   }
 }
+
+export function updateProjectSessionDocument(session: ProjectSession, document: SceneDocument): ProjectSession {
+  return {
+    ...session,
+    document,
+    isDirty: true,
+  }
+}
