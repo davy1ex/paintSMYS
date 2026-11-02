@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import type { ProjectSession } from '../../application/project-session'
+import EditorMenuBar from './EditorMenuBar'
 import './editor-workspace.css'
 
 type EditorWorkspaceProps = {
@@ -9,6 +10,7 @@ type EditorWorkspaceProps = {
 function EditorWorkspace({ session }: EditorWorkspaceProps) {
   const canvasRef = useRef<HTMLDivElement>(null)
   const [viewportSize, setViewportSize] = useState({ width: 0, height: 0 })
+  const [mockActionMessage, setMockActionMessage] = useState('')
   const { document } = session
   const { artboard } = document
   const fitScale = Math.min(
@@ -32,9 +34,7 @@ function EditorWorkspace({ session }: EditorWorkspaceProps) {
 
   return (
     <main className="editor-shell">
-      <nav className="editor-menu-bar" aria-label="Main menu">
-        <span>File</span><span>Edit</span><span>View</span><span>Help</span>
-      </nav>
+      <EditorMenuBar onMockAction={(action) => setMockActionMessage(`${action} — mock action`)} />
       <div className="editor-toolbar" aria-label="Editor status">
         <div className="editor-project-mark" aria-hidden="true">P</div>
         <strong className="editor-project-name">{session.projectName}</strong>
@@ -86,7 +86,11 @@ function EditorWorkspace({ session }: EditorWorkspaceProps) {
           <div className="inspector-empty">Select an object to inspect its properties.</div>
         </aside>
       </div>
-      <footer className="editor-statusbar"><span>{session.projectRoot ? 'Project opened from folder' : session.isDirty ? 'Project folder not set' : 'Opened in browser'}</span><span>paintSMYS</span></footer>
+      <footer className="editor-statusbar">
+        <span>{session.projectRoot ? 'Project opened from folder' : session.isDirty ? 'Project folder not set' : 'Opened in browser'}</span>
+        <span className="editor-status-message" role="status" aria-live="polite" aria-atomic="true">{mockActionMessage}</span>
+        <span>paintSMYS</span>
+      </footer>
     </main>
   )
 }

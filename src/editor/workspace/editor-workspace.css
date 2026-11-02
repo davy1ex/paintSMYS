@@ -10,6 +10,14 @@
   font-size: 12px;
 }
 .editor-menu-bar { display: flex; min-height: 29px; align-items: center; gap: 20px; padding: 4px 10px; border-bottom: 1px solid #808080; user-select: none; }
+.editor-menu-group { position: relative; }
+.editor-menu-trigger { padding: 3px 6px; border: 1px solid transparent; background: transparent; color: inherit; font: inherit; cursor: default; }
+.editor-menu-trigger:hover, .editor-menu-trigger[aria-expanded="true"] { border-color: #fff #808080 #808080 #fff; }
+.editor-menu-trigger:focus-visible { outline: 1px dotted #111; outline-offset: -3px; }
+.editor-file-menu { position: absolute; z-index: 5; top: calc(100% + 4px); left: 0; width: 176px; padding: 2px; border: 1px solid; border-color: #fff #404040 #404040 #fff; background: #c0c0c0; box-shadow: 1px 1px 0 #000; }
+.editor-file-menu__item { display: block; width: 100%; min-height: 25px; padding: 4px 8px 4px 25px; border: 0; background: transparent; color: #111; font: inherit; text-align: left; white-space: nowrap; cursor: default; }
+.editor-file-menu__item:hover, .editor-file-menu__item:focus { outline: none; background: #000080; color: #fff; }
+.editor-file-menu__separator { height: 1px; margin: 3px 2px 3px 21px; background: #808080; box-shadow: 0 1px #fff; }
 .editor-toolbar { display: flex; min-height: 43px; align-items: center; gap: 9px; padding: 5px 9px; border-bottom: 1px solid #808080; }
 .editor-project-mark { display: grid; width: 26px; height: 26px; border: 1px solid; border-color: #fff #404040 #404040 #fff; background: #000080; color: #fff; font-size: 18px; font-weight: 700; place-items: center; }
 .editor-project-name { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -33,7 +41,8 @@
 .color-chip { display: inline-block; width: 13px; height: 13px; border: 1px solid #555; }
 .inspector-divider { height: 1px; margin-top: 17px; background: #808080; box-shadow: 0 1px #fff; }
 .inspector-empty { margin: 25px 10px 0; padding: 10px 8px; border: 1px inset #eee; color: #555; font-size: 11px; line-height: 1.45; }
-.editor-statusbar { display: flex; min-height: 22px; align-items: center; justify-content: space-between; padding: 2px 8px; border-top: 1px solid #fff; color: #444; font-size: 10px; }
+.editor-statusbar { display: flex; min-height: 22px; align-items: center; justify-content: space-between; gap: 12px; padding: 2px 8px; border-top: 1px solid #fff; color: #444; font-size: 10px; }
+.editor-status-message { color: #000080; }
 
 @media (max-width: 650px) {
   .property-inspector { width: 180px; flex-basis: 180px; }
