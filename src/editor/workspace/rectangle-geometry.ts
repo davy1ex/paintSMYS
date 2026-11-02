@@ -1,4 +1,4 @@
-import type { SceneObject } from '../../core/document/scene-document'
+import type { SceneObject, TextObject } from '../../core/document/scene-document'
 
 export type Point = { x: number; y: number }
 
@@ -36,6 +36,22 @@ export function translateRectangle<T extends Pick<SceneObject, 'x' | 'y'>>(recta
   return { ...rectangle, x: rectangle.x + delta.x, y: rectangle.y + delta.y }
 }
 
+export function getTextObjectBounds(object: Pick<TextObject, 'x' | 'y' | 'text' | 'fontSize'>): NormalizedRectangle {
+  const lines = object.text.split('\n')
+  const longestLine = Math.max(0, ...lines.map((line) => line.length))
+  return {
+    x: object.x,
+    y: object.y,
+    width: Math.max(1, longestLine) * object.fontSize * 0.6,
+    height: lines.length * object.fontSize * 1.2,
+  }
+}
+
+export function getSceneObjectBounds(object: SceneObject): NormalizedRectangle {
+  if (object.type === 'text') return getTextObjectBounds(object)
+  return { x: object.x, y: object.y, width: object.width, height: object.height }
+}
+
 export function normalizeRectangle(start: Point, end: Point): NormalizedRectangle {
   return {
     x: Math.min(start.x, end.x),
@@ -50,18 +66,22 @@ export function isGestureLongEnough(start: Point, end: Point, minimumCssPixels =
   return Math.hypot(end.x - start.x, end.y - start.y) >= minimumCssPixels
 }
 
-export function findTopmostRectangleAtPoint(
+export function findTopmostObjectAtPoint(
   objects: SceneObject[],
   point: Point,
   tolerance: Point = { x: 0, y: 0 },
 ): string | null {
   for (let index = objects.length - 1; index >= 0; index -= 1) {
     const object = objects[index]
+    const bounds = getSceneObjectBounds(object)
     if (
-      point.x >= object.x - tolerance.x && point.x <= object.x + object.width + tolerance.x &&
-      point.y >= object.y - tolerance.y && point.y <= object.y + object.height + tolerance.y
+      point.x >= bounds.x - tolerance.x && point.x <= bounds.x + bounds.width + tolerance.x &&
+      point.y >= bounds.y - tolerance.y && point.y <= bounds.y + bounds.height + tolerance.y
     ) return object.id
   }
 
   return null
 }
+
+/** @deprecated Use findTopmostObjectAtPoint; kept for existing geometry callers. */
+export const findTopmostRectangleAtPoint = findTopmostObjectAtPoint

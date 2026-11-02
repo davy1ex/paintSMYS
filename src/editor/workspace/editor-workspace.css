@@ -39,13 +39,16 @@
 .tool-panel__button svg { display: block; width: 18px; height: 18px; }
 .editor-stage { position: relative; display: flex; min-width: 0; flex: 1; flex-direction: column; padding: 16px 16px 22px; background: #808080; }
 .editor-canvas-wrap { display: grid; min-width: 0; min-height: 0; flex: 1; overflow: hidden; place-items: center; background-color: #a0a0a0; background-image: linear-gradient(45deg, #aaa 25%, transparent 25%), linear-gradient(-45deg, #aaa 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #aaa 75%), linear-gradient(-45deg, transparent 75%, #aaa 75%); background-position: 0 0, 0 5px, 5px -5px, -5px 0; background-size: 10px 10px; }
-.editor-artboard { flex: none; overflow: hidden; background: #fff; cursor: default; box-shadow: 1px 1px 0 #333, 2px 2px 0 #ddd; }
+.editor-artboard { position: relative; flex: none; overflow: hidden; background: #fff; cursor: default; box-shadow: 1px 1px 0 #333, 2px 2px 0 #ddd; }
 .editor-artboard--move-target, .editor-artboard--moving { cursor: move; }
 .editor-artboard--drawing { cursor: crosshair; }
+.editor-artboard--texting, .scene-svg--texting, .scene-svg--texting * { cursor: text; }
 body.editor-workspace--moving, body.editor-workspace--moving * { cursor: move !important; }
 .scene-svg { display: block; width: 100%; height: 100%; cursor: default; touch-action: none; }
 .scene-svg--move-target, .scene-svg--move-target *, .scene-svg--moving, .scene-svg--moving * { cursor: move; }
 .scene-svg--drawing, .scene-svg--drawing * { cursor: crosshair; }
+.text-draft-input { position: absolute; z-index: 1; box-sizing: content-box; overflow: hidden; padding: 2px; border: 1px solid #000080; border-radius: 0; outline: 1px solid #fff; background: #fff; color: #000; line-height: 1.2; white-space: pre; resize: none; }
+.text-draft-input::placeholder { color: #555; opacity: 1; }
 .editor-stage__footer { position: absolute; right: 0; bottom: 0; left: 0; display: flex; height: 21px; align-items: center; justify-content: space-between; padding: 2px 7px; border-top: 1px solid #404040; color: #eee; font-size: 10px; }
 .property-inspector { display: flex; width: 230px; flex: 0 0 230px; flex-direction: column; border-left: 2px solid; border-color: #fff #404040 #404040 #fff; background: #c0c0c0; }
 .inspector-title { min-height: 29px; padding: 7px 9px; border-bottom: 1px solid #808080; font-weight: 700; }

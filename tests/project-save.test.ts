@@ -80,8 +80,11 @@ test('New Project draws one Rectangle, becomes dirty, then Save and Open restore
     assert.equal(opened.document.id, session.document.id)
     assert.equal(opened.isDirty, false)
     assert.equal(opened.document.objects[0].id, rectangle.id)
+    const openedRectangle = opened.document.objects[0]
+    assert.equal(openedRectangle.type, 'rectangle')
+    if (openedRectangle.type !== 'rectangle') assert.fail('Expected the saved Rectangle object')
     assert.deepEqual(
-      (({ x, y, width, height, fill, stroke, strokeWidth }) => ({ x, y, width, height, fill, stroke, strokeWidth }))(opened.document.objects[0]),
+      (({ x, y, width, height, fill, stroke, strokeWidth }) => ({ x, y, width, height, fill, stroke, strokeWidth }))(openedRectangle),
       { x: 10, y: 20, width: 80, height: 40, fill: '#ffffff', stroke: '#000000', strokeWidth: 1 },
     )
   })

@@ -1,4 +1,4 @@
-type ToolName = 'select' | 'rectangle'
+type ToolName = 'select' | 'rectangle' | 'text'
 
 type ToolPanelProps = {
   activeTool: ToolName
@@ -16,10 +16,17 @@ function ToolIcon({ tool }: { tool: ToolName }) {
     )
   }
 
-  return (
+  if (tool === 'rectangle') return (
     <svg viewBox="0 0 20 20" aria-hidden="true" focusable="false" shapeRendering="crispEdges">
       <rect x="3.5" y="4.5" width="13" height="11" fill="none" stroke="#111" />
       <path d="M5 6h10v8H5z" fill="none" stroke="#fff" />
+    </svg>
+  )
+
+  return (
+    <svg viewBox="0 0 20 20" aria-hidden="true" focusable="false" shapeRendering="crispEdges">
+      <path d="M3 3h14v3h-5v11H8V6H3z" fill="#111" />
+      <path d="M4 4h12v1H4zM9 6h2v10H9z" fill="#fff" />
     </svg>
   )
 }
@@ -28,6 +35,7 @@ function ToolPanel({ activeTool, onToolChange }: ToolPanelProps) {
   const tools: { name: ToolName; label: string }[] = [
     { name: 'select', label: 'Select / Move' },
     { name: 'rectangle', label: 'Rectangle' },
+    { name: 'text', label: 'Text' },
   ]
 
   return (

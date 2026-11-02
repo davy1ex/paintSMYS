@@ -7,7 +7,7 @@ import type { ProjectSaveMode, ProjectSavePort } from '../application/project-sa
 import type { SaveProjectSessionResult } from '../application/save-project-session'
 import type { SceneDocument } from '../core/document/scene-document'
 import { mergeSavedProjectSession, saveProjectSession } from '../application/save-project-session'
-import EditorWorkspace from '../editor/workspace/EditorWorkspace'
+import EditorWorkspace, { type EditorWorkspaceHandle } from '../editor/workspace/EditorWorkspace'
 import CloseProjectDialog, { type ClosePrompt } from './CloseProjectDialog'
 import NewProjectScreen from './screens/NewProjectScreen'
 import WelcomeScreen from './screens/WelcomeScreen'
@@ -27,6 +27,7 @@ function App({ projectAdapter }: AppProps) {
   const [statusMessage, setStatusMessage] = useState('')
   const [closePrompt, setClosePrompt] = useState<ClosePrompt | null>(null)
   const sessionRef = useRef<ProjectSession | null>(null)
+  const editorWorkspaceRef = useRef<EditorWorkspaceHandle>(null)
   const historyRef = useRef<DocumentHistory | null>(null)
   const savingRef = useRef(false)
   const closePromptRef = useRef<ClosePrompt | null>(null)
@@ -54,6 +55,7 @@ function App({ projectAdapter }: AppProps) {
     if (!controls) return
 
     const unsubscribeRequest = controls.onCloseRequest((requestId) => {
+      editorWorkspaceRef.current?.commitTextDraft()
       if (closePromptRef.current) {
         if (closePromptRef.current.requestId !== requestId) controls.respondToCloseRequest(requestId, 'cancel')
         return
@@ -76,14 +78,16 @@ function App({ projectAdapter }: AppProps) {
   }, [])
 
   useEffect(() => {
-    if (window.paintSMYS || !requiresCloseConfirmation(session)) return
+    if (window.paintSMYS) return
     const protectBrowserClose = (event: BeforeUnloadEvent) => {
+      editorWorkspaceRef.current?.commitTextDraft()
+      if (!requiresCloseConfirmation(sessionRef.current)) return
       event.preventDefault()
       event.returnValue = ''
     }
     window.addEventListener('beforeunload', protectBrowserClose)
     return () => window.removeEventListener('beforeunload', protectBrowserClose)
-  }, [session])
+  }, [])
 
   async function openProject() {
     setBusy(true)
@@ -222,6 +226,7 @@ function App({ projectAdapter }: AppProps) {
     return (
       <>
         <EditorWorkspace
+          ref={editorWorkspaceRef}
           key={editorSessionVersion}
           session={session}
           canSave={Boolean(projectAdapter.saveProject)}

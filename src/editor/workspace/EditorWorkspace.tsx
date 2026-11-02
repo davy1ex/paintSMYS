@@ -1,13 +1,17 @@
-import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
-import { addRectangle, moveObject, removeObject, type RectangleGeometry, type SceneDocument, type SceneObject } from '../../core/document/scene-document'
+import { forwardRef, useEffect, useImperativeHandle, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from 'react'
+import { addRectangle, addTextObject, DEFAULT_TEXT_FONT_SIZE, MAX_TEXT_LENGTH, moveObject, removeObject, updateTextObject, type RectangleGeometry, type SceneDocument, type SceneObject } from '../../core/document/scene-document'
 import type { ProjectSession } from '../../application/project-session'
 import type { ProjectSaveMode } from '../../application/project-save-port'
-import { findTopmostRectangleAtPoint, isGestureLongEnough, normalizeRectangle, transformPoint, transformVector, translateRectangle, type NormalizedRectangle, type Point } from './rectangle-geometry'
+import { findTopmostObjectAtPoint, getSceneObjectBounds, isGestureLongEnough, normalizeRectangle, transformPoint, transformVector, translateRectangle, type NormalizedRectangle, type Point } from './rectangle-geometry'
 import EditorMenuBar from './EditorMenuBar'
 import ToolPanel from './ToolPanel'
 import './editor-workspace.css'
 
-type ActiveTool = 'select' | 'rectangle'
+type ActiveTool = 'select' | 'rectangle' | 'text'
+
+export type EditorWorkspaceHandle = {
+  commitTextDraft: () => boolean
+}
 
 type EditorWorkspaceProps = {
   session: ProjectSession
@@ -24,6 +28,17 @@ type EditorWorkspaceProps = {
   onDocumentChange: (previousDocument: SceneDocument, document: SceneDocument) => void
 }
 
+type TextDraft = {
+  mode: 'create' | 'edit'
+  x: number
+  y: number
+  text: string
+  fontFamily?: string
+  fontSize?: number
+  objectId?: string
+  originalText?: string
+}
+
 type GestureBase = {
   pointerId: number
   pointerType: string
@@ -38,7 +53,7 @@ type RectangleDrawGesture = GestureBase & {
   startArtboard: Point
 }
 
-type RectangleMoveGesture = GestureBase & {
+type ObjectMoveGesture = GestureBase & {
   kind: 'move'
   objectId: string
   originalX: number
@@ -46,7 +61,7 @@ type RectangleMoveGesture = GestureBase & {
   sceneDelta: Point
 }
 
-type RectangleGesture = RectangleDrawGesture | RectangleMoveGesture
+type EditorGesture = RectangleDrawGesture | ObjectMoveGesture
 
 const RECTANGLE_HIT_SLOP_CSS_PIXELS = 8
 
@@ -80,7 +95,7 @@ function findObjectAtClientPoint(svg: SVGSVGElement | null, objects: SceneObject
     x: Math.abs(horizontalSlop.x) + Math.abs(verticalSlop.x),
     y: Math.abs(horizontalSlop.y) + Math.abs(verticalSlop.y),
   }
-  return findTopmostRectangleAtPoint(objects, scenePoint, tolerance)
+  return findTopmostObjectAtPoint(objects, scenePoint, tolerance)
 }
 
 function isEditableTarget(target: EventTarget | null): boolean {
@@ -88,7 +103,7 @@ function isEditableTarget(target: EventTarget | null): boolean {
   return target.isContentEditable || target.closest('input, textarea, select') !== null
 }
 
-function EditorWorkspace({
+const EditorWorkspace = forwardRef<EditorWorkspaceHandle, EditorWorkspaceProps>(function EditorWorkspace({
   session,
   canSave,
   isSaving,
@@ -101,10 +116,12 @@ function EditorWorkspace({
   onUndo,
   onRedo,
   onDocumentChange,
-}: EditorWorkspaceProps) {
+}, ref) {
   const canvasRef = useRef<HTMLDivElement>(null)
   const svgRef = useRef<SVGSVGElement>(null)
-  const gestureRef = useRef<RectangleGesture | null>(null)
+  const gestureRef = useRef<EditorGesture | null>(null)
+  const textDraftRef = useRef<TextDraft | null>(null)
+  const textareaRef = useRef<HTMLTextAreaElement>(null)
   const pointerClientRef = useRef<Point | null>(null)
   const [viewportSize, setViewportSize] = useState({ width: 0, height: 0 })
   const [mockActionMessage, setMockActionMessage] = useState('')
@@ -114,6 +131,7 @@ function EditorWorkspace({
   const [hoveredObjectId, setHoveredObjectId] = useState<string | null>(null)
   const [isMovingObject, setIsMovingObject] = useState(false)
   const [selectedObjectId, setSelectedObjectId] = useState<string | null>(null)
+  const [textDraft, setTextDraft] = useState<TextDraft | null>(null)
   const { document } = session
   const { artboard } = document
   const fitScale = Math.min(
@@ -125,6 +143,48 @@ function EditorWorkspace({
   const boardHeight = Math.max(0, artboard.height * scale)
   const zoomLabel = scale > 0 ? `${Math.round(scale * 100)}%` : 'Fit'
   const selectedObject = document.objects.find((object) => object.id === selectedObjectId) ?? null
+  const selectedBounds = selectedObject ? getSceneObjectBounds(selectedObject) : null
+  const visibleSelectedBounds = selectedObject && selectedBounds
+    ? {
+      ...selectedBounds,
+      x: movePreview?.objectId === selectedObject.id ? movePreview.x : selectedObject.x,
+      y: movePreview?.objectId === selectedObject.id ? movePreview.y : selectedObject.y,
+    }
+    : null
+  const setActiveTextDraft = (nextDraft: TextDraft | null) => {
+    textDraftRef.current = nextDraft
+    setTextDraft(nextDraft)
+  }
+
+  function commitTextDraft(): boolean {
+    const draft = textDraftRef.current
+    if (!draft) return false
+    setActiveTextDraft(null)
+    if (!draft.text.trim()) return true
+
+    if (draft.mode === 'create') {
+      const nextDocument = addTextObject(document, { x: draft.x, y: draft.y, text: draft.text })
+      const created = nextDocument.objects[nextDocument.objects.length - 1]
+      setSelectedObjectId(created.id)
+      onDocumentChange(document, nextDocument)
+      return true
+    }
+
+    if (draft.objectId && draft.text !== draft.originalText) {
+      onDocumentChange(document, updateTextObject(document, draft.objectId, draft.text))
+    }
+    if (draft.objectId) setSelectedObjectId(draft.objectId)
+    return true
+  }
+
+  function cancelTextDraft() {
+    const draft = textDraftRef.current
+    if (!draft) return
+    setActiveTextDraft(null)
+    setSelectedObjectId(draft.mode === 'edit' ? draft.objectId ?? null : null)
+  }
+
+  useImperativeHandle(ref, () => ({ commitTextDraft }), [document, onDocumentChange])
 
   useEffect(() => {
     const element = canvasRef.current
@@ -135,6 +195,20 @@ function EditorWorkspace({
     observer.observe(element)
     return () => observer.disconnect()
   }, [])
+
+  useEffect(() => {
+    if (textDraft) textareaRef.current?.focus()
+  }, [Boolean(textDraft)])
+
+  function handleSave(mode: ProjectSaveMode = 'save') {
+    commitTextDraft()
+    onSave(mode)
+  }
+
+  function handleSaveAs() {
+    commitTextDraft()
+    onSaveAs()
+  }
 
   useEffect(() => {
     const handleShortcut = (event: KeyboardEvent) => {
@@ -165,12 +239,12 @@ function EditorWorkspace({
       }
       if (canSave && !event.shiftKey && (event.ctrlKey || event.metaKey) && key === 's') {
         event.preventDefault()
-        if (!isSaving) onSave()
+        if (!isSaving) handleSave()
       }
     }
     globalThis.document.addEventListener('keydown', handleShortcut)
     return () => globalThis.document.removeEventListener('keydown', handleShortcut)
-  }, [canRedo, canSave, canUndo, isClosePromptOpen, isSaving, onRedo, onSave, onUndo])
+  }, [canRedo, canSave, canUndo, commitTextDraft, isClosePromptOpen, isSaving, onRedo, onSave, onUndo])
 
   useEffect(() => {
     const updateHover = (clientPoint: Point, objects: SceneObject[] = document.objects) => {
@@ -388,6 +462,48 @@ function EditorWorkspace({
     return () => globalThis.document.removeEventListener('keydown', handleDelete)
   }, [document, isClosePromptOpen, onDocumentChange, selectedObjectId])
 
+  function handleDoubleClick(event: ReactMouseEvent<SVGSVGElement>) {
+    if (activeTool !== 'select') return
+    const objectId = findObjectAtClientPoint(event.currentTarget, document.objects, {
+      x: event.clientX,
+      y: event.clientY,
+    })
+    const object = document.objects.find((candidate) => candidate.id === objectId)
+    if (object?.type !== 'text') return
+
+    event.preventDefault()
+    event.stopPropagation()
+    const gesture = gestureRef.current
+    gestureRef.current = null
+    if (gesture && event.currentTarget.hasPointerCapture(gesture.pointerId)) {
+      event.currentTarget.releasePointerCapture(gesture.pointerId)
+    }
+    setPreview(null)
+    setMovePreview(null)
+    setIsMovingObject(false)
+    setSelectedObjectId(object.id)
+    setActiveTextDraft({
+      mode: 'edit',
+      objectId: object.id,
+      originalText: object.text,
+      text: object.text,
+      fontFamily: object.fontFamily,
+      fontSize: object.fontSize,
+      x: object.x,
+      y: object.y,
+    })
+  }
+
+  function handleCanvasClick(event: ReactMouseEvent<SVGSVGElement>) {
+    if (activeTool !== 'text' || textDraftRef.current) return
+    const position = pointerToArtboard(event.currentTarget, { x: event.clientX, y: event.clientY })
+    if (!position) return
+    setSelectedObjectId(null)
+    setHoveredObjectId(null)
+    setIsMovingObject(false)
+    setActiveTextDraft({ mode: 'create', ...position, text: '' })
+  }
+
   function handlePointerDown(event: ReactPointerEvent<SVGSVGElement>) {
     if (event.button !== 0 || !event.isPrimary || gestureRef.current) return
     const startClient = { x: event.clientX, y: event.clientY }
@@ -462,8 +578,8 @@ function EditorWorkspace({
         isSaving={isSaving}
         canUndo={canUndo}
         canRedo={canRedo}
-        onSave={() => onSave('save')}
-        onSaveAs={onSaveAs}
+        onSave={() => handleSave('save')}
+        onSaveAs={handleSaveAs}
         onUndo={onUndo}
         onRedo={onRedo}
         onMockAction={(action) => setMockActionMessage(`${action} — mock action`)}
@@ -471,7 +587,7 @@ function EditorWorkspace({
       <div className="editor-toolbar" aria-label="Editor status">
         <div className="editor-project-mark" aria-hidden="true">P</div>
         <strong className="editor-project-name">{session.projectName}</strong>
-        <span className="editor-project-status">{session.isDirty ? 'Unsaved session' : 'Saved project'}</span>
+        <span className="editor-project-status">{textDraft ? 'Typing text…' : session.isDirty ? 'Unsaved session' : 'Saved project'}</span>
         <span className="editor-toolbar-spacer" />
         <span className="editor-dimensions">{artboard.width} × {artboard.height} px</span>
       </div>
@@ -480,42 +596,53 @@ function EditorWorkspace({
         <section className="editor-stage" aria-label="Artboard workspace">
           <div className="editor-canvas-wrap" ref={canvasRef}>
             <div
-              className={`editor-artboard${activeTool === 'rectangle' ? ' editor-artboard--drawing' : ''}${activeTool === 'select' && hoveredObjectId ? ' editor-artboard--move-target' : ''}${isMovingObject ? ' editor-artboard--moving' : ''}`}
+              className={`editor-artboard${activeTool === 'rectangle' ? ' editor-artboard--drawing' : ''}${activeTool === 'text' ? ' editor-artboard--texting' : ''}${activeTool === 'select' && hoveredObjectId ? ' editor-artboard--move-target' : ''}${isMovingObject ? ' editor-artboard--moving' : ''}`}
               aria-label={`Artboard ${artboard.width} by ${artboard.height} pixels`}
               style={{ width: boardWidth, height: boardHeight }}
             >
               <svg
                 ref={svgRef}
-                className={`scene-svg${activeTool === 'rectangle' ? ' scene-svg--drawing' : ''}${activeTool === 'select' && hoveredObjectId ? ' scene-svg--move-target' : ''}${isMovingObject ? ' scene-svg--moving' : ''}`}
+                className={`scene-svg${activeTool === 'rectangle' ? ' scene-svg--drawing' : ''}${activeTool === 'text' ? ' scene-svg--texting' : ''}${activeTool === 'select' && hoveredObjectId ? ' scene-svg--move-target' : ''}${isMovingObject ? ' scene-svg--moving' : ''}`}
                 viewBox={`0 0 ${artboard.width} ${artboard.height}`}
                 role="img"
                 aria-label="Scene contents"
                 onPointerDown={handlePointerDown}
+                onClick={handleCanvasClick}
+                onDoubleClick={handleDoubleClick}
                 onLostPointerCapture={handleLostPointerCapture}
               >
                 <rect width={artboard.width} height={artboard.height} fill={artboard.backgroundColor} />
                 {document.objects.map((object) => {
                   const position = movePreview?.objectId === object.id ? movePreview : object
-                  return (
-                    <rect
-                      key={object.id}
-                      x={position.x}
-                      y={position.y}
-                      width={object.width}
-                      height={object.height}
-                      fill={object.fill}
-                      stroke={object.stroke}
-                      strokeWidth={object.strokeWidth}
-                    />
-                  )
+                  if (object.type === 'text') {
+                    const lineHeight = object.fontSize * 1.2
+                    return (
+                      <text
+                        key={object.id}
+                        fontFamily={`${object.fontFamily}, monospace`}
+                        fontSize={object.fontSize}
+                        fill={object.color}
+                        xmlSpace="preserve"
+                        pointerEvents="none"
+                        aria-label={object.text}
+                      >
+                        {object.text.split('\n').map((line, index) => (
+                          <tspan key={index} x={position.x} y={position.y + object.fontSize + index * lineHeight}>
+                            {line || '\u00a0'}
+                          </tspan>
+                        ))}
+                      </text>
+                    )
+                  }
+                  return <rect key={object.id} x={position.x} y={position.y} width={object.width} height={object.height} fill={object.fill} stroke={object.stroke} strokeWidth={object.strokeWidth} />
                 })}
-                {selectedObject && (
+                {selectedObject && visibleSelectedBounds && (
                   <>
                     <rect
-                      x={movePreview?.objectId === selectedObject.id ? movePreview.x : selectedObject.x}
-                      y={movePreview?.objectId === selectedObject.id ? movePreview.y : selectedObject.y}
-                      width={selectedObject.width}
-                      height={selectedObject.height}
+                      x={visibleSelectedBounds.x}
+                      y={visibleSelectedBounds.y}
+                      width={visibleSelectedBounds.width}
+                      height={visibleSelectedBounds.height}
                       fill="none"
                       stroke="#ffffff"
                       strokeWidth={4}
@@ -525,10 +652,10 @@ function EditorWorkspace({
                       aria-hidden="true"
                     />
                     <rect
-                      x={movePreview?.objectId === selectedObject.id ? movePreview.x : selectedObject.x}
-                      y={movePreview?.objectId === selectedObject.id ? movePreview.y : selectedObject.y}
-                      width={selectedObject.width}
-                      height={selectedObject.height}
+                      x={visibleSelectedBounds.x}
+                      y={visibleSelectedBounds.y}
+                      width={visibleSelectedBounds.width}
+                      height={visibleSelectedBounds.height}
                       fill="none"
                       stroke="#000080"
                       strokeWidth={1.5}
@@ -554,6 +681,45 @@ function EditorWorkspace({
                   />
                 )}
               </svg>
+              {textDraft && (
+                <textarea
+                  ref={textareaRef}
+                  className="text-draft-input"
+                  autoFocus
+                  aria-label="Type text. Press Control or Command plus Enter to finish."
+                  value={textDraft.text}
+                  placeholder="Type text…  Ctrl+Enter to finish"
+                  maxLength={MAX_TEXT_LENGTH}
+                  spellCheck={false}
+                  style={{
+                    left: textDraft.x * scale,
+                    top: textDraft.y * scale,
+                    width: Math.max(180, Math.max(1, ...textDraft.text.split('\n').map((line) => line.length)) * (textDraft.fontSize ?? DEFAULT_TEXT_FONT_SIZE) * 0.6 * scale + 4),
+                    height: Math.max(28, Math.max(1, textDraft.text.split('\n').length) * (textDraft.fontSize ?? DEFAULT_TEXT_FONT_SIZE) * 1.2 * scale + 4),
+                    fontSize: (textDraft.fontSize ?? DEFAULT_TEXT_FONT_SIZE) * scale,
+                    fontFamily: textDraft.fontFamily ?? 'Courier New, monospace',
+                  }}
+                  onChange={(event) => {
+                    const draft = textDraftRef.current
+                    if (draft) setActiveTextDraft({ ...draft, text: event.currentTarget.value })
+                  }}
+                  onKeyDown={(event) => {
+                    event.stopPropagation()
+                    if (event.nativeEvent.isComposing) return
+                    if (event.key === 'Escape') {
+                      event.preventDefault()
+                      cancelTextDraft()
+                    } else if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
+                      event.preventDefault()
+                      commitTextDraft()
+                    } else if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') {
+                      event.preventDefault()
+                      if (canSave && !isSaving) handleSave()
+                    }
+                  }}
+                  onBlur={commitTextDraft}
+                />
+              )}
             </div>
           </div>
           <div className="editor-stage__footer"><span>{zoomLabel}</span><span>{document.objects.length} objects</span></div>
@@ -582,6 +748,6 @@ function EditorWorkspace({
       </footer>
     </main>
   )
-}
+})
 
 export default EditorWorkspace
