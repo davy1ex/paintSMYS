@@ -7,9 +7,25 @@ type DesktopWindowFrameProps = {
 
 function DesktopWindowFrame({ children }: DesktopWindowFrameProps) {
   const [maximized, setMaximized] = useState(false)
+  const [title, setTitle] = useState(document.title)
   const controls = window.paintSMYS?.windowControls
 
-  useEffect(() => controls?.onMaximizedChange(setMaximized), [controls])
+  useEffect(() => {
+    if (!controls) return
+    const unsubscribe = controls.onMaximizedChange(setMaximized)
+    void controls.isMaximized().then(setMaximized)
+    return unsubscribe
+  }, [controls])
+
+  useEffect(() => {
+    const titleElement = document.querySelector('title')
+    if (!titleElement) return
+    const updateTitle = () => setTitle(document.title.replace(/\s+[—-]\s+paintSMYS$/, ''))
+    const observer = new MutationObserver(updateTitle)
+    observer.observe(titleElement, { subtree: true, childList: true, characterData: true })
+    updateTitle()
+    return () => observer.disconnect()
+  }, [])
 
   return (
     <div className="desktop-frame">
@@ -19,7 +35,7 @@ function DesktopWindowFrame({ children }: DesktopWindowFrameProps) {
           className="desktop-titlebar__drag-region"
           onDoubleClick={() => controls?.toggleMaximize()}
         >
-          <span>paintSMYS</span>
+          <span>{title}</span>
         </div>
         <div className="desktop-titlebar__controls">
           <button

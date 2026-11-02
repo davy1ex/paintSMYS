@@ -1,4 +1,5 @@
-import { app, BrowserWindow, ipcMain } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain } from 'electron'
+import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 
 function createWindow(): void {
@@ -46,6 +47,33 @@ ipcMain.on('paintSMYS:window-control', (event, action: unknown) => {
     else window.maximize()
   } else if (action === 'close') {
     window.close()
+  }
+})
+
+ipcMain.handle('paintSMYS:is-maximized', (event) => {
+  return BrowserWindow.fromWebContents(event.sender)?.isMaximized() ?? false
+})
+
+ipcMain.handle('paintSMYS:open-project', async (event) => {
+  const owner = BrowserWindow.fromWebContents(event.sender)
+  if (!owner) return { status: 'error', message: 'The application window is unavailable.' }
+
+  const result = await dialog.showOpenDialog(owner, {
+    title: 'Open paintSMYS Project',
+    properties: ['openDirectory'],
+  })
+  if (result.canceled || result.filePaths.length === 0) return { status: 'cancelled' }
+
+  const projectRoot = result.filePaths[0]
+  try {
+    const manifestText = await readFile(join(projectRoot, 'project.json'), 'utf8')
+    return { status: 'loaded', manifestText, projectRoot }
+  } catch (error) {
+    const code = typeof error === 'object' && error !== null && 'code' in error ? String(error.code) : ''
+    if (code === 'ENOENT') {
+      return { status: 'error', message: 'The selected folder does not contain project.json.' }
+    }
+    return { status: 'error', message: 'The project manifest could not be read.' }
   }
 })
 

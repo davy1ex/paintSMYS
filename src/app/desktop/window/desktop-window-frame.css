@@ -11,6 +11,18 @@
   flex: 1;
 }
 
+.desktop-frame > .startup-window,
+.desktop-frame > .editor-shell {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  flex: 1;
+}
+
+.desktop-frame .startup-titlebar {
+  display: none;
+}
+
 .desktop-titlebar {
   display: flex;
   height: 30px;
