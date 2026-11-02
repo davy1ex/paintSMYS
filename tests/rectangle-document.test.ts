@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { addRectangle, createSceneDocument, DocumentValidationError } from '../src/core/document/scene-document'
+import { addRectangle, createSceneDocument, DocumentValidationError, removeObject } from '../src/core/document/scene-document'
 
 test('addRectangle returns a valid immutable scene and preserves object order', () => {
   const original = createSceneDocument(800, 600)
@@ -36,4 +36,29 @@ test('addRectangle rejects invalid geometry through the scene validator', () => 
   ]) {
     assert.throws(() => addRectangle(scene, geometry), DocumentValidationError)
   }
+})
+
+test('removeObject returns a valid immutable scene and preserves the remaining order', () => {
+  const original = createSceneDocument(800, 600)
+  const withFirst = addRectangle(original, { x: 10, y: 20, width: 80, height: 40 })
+  const withSecond = addRectangle(withFirst, { x: 100, y: 120, width: 50, height: 30 })
+  const withThird = addRectangle(withSecond, { x: 200, y: 220, width: 25, height: 15 })
+  const [first, second, third] = withThird.objects
+
+  const result = removeObject(withThird, second.id)
+
+  assert.notEqual(result, withThird)
+  assert.notEqual(result.objects, withThird.objects)
+  assert.deepEqual(result.objects.map((object) => object.id), [first.id, third.id])
+  assert.deepEqual(withThird.objects.map((object) => object.id), [first.id, second.id, third.id])
+  assert.equal(result.id, withThird.id)
+  assert.deepEqual(result.artboard, withThird.artboard)
+})
+
+test('removeObject reports an unknown ID without changing the source document', () => {
+  const original = addRectangle(createSceneDocument(800, 600), { x: 10, y: 20, width: 80, height: 40 })
+  const before = structuredClone(original)
+
+  assert.throws(() => removeObject(original, 'missing-object'), DocumentValidationError)
+  assert.deepEqual(original, before)
 })

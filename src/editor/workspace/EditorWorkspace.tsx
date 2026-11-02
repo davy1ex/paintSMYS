@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
-import { addRectangle, type RectangleGeometry, type SceneDocument } from '../../core/document/scene-document'
+import { addRectangle, removeObject, type RectangleGeometry, type SceneDocument } from '../../core/document/scene-document'
 import type { ProjectSession } from '../../application/project-session'
 import type { ProjectSaveMode } from '../../application/project-save-port'
-import { isGestureLongEnough, normalizeRectangle, transformPoint, type NormalizedRectangle, type Point } from './rectangle-geometry'
+import { findTopmostRectangleAtPoint, isGestureLongEnough, normalizeRectangle, transformPoint, type NormalizedRectangle, type Point } from './rectangle-geometry'
 import EditorMenuBar from './EditorMenuBar'
 import ToolPanel from './ToolPanel'
 import './editor-workspace.css'
@@ -14,6 +14,7 @@ type EditorWorkspaceProps = {
   canSave: boolean
   isSaving: boolean
   statusMessage: string
+  isClosePromptOpen: boolean
   onSave: (mode?: ProjectSaveMode) => void
   onSaveAs: () => void
   onDocumentChange: (document: SceneDocument) => void
@@ -33,7 +34,12 @@ function pointerToArtboard(svg: SVGSVGElement, point: Point): Point | null {
   return transformPoint(point, screenTransform.inverse())
 }
 
-function EditorWorkspace({ session, canSave, isSaving, statusMessage, onSave, onSaveAs, onDocumentChange }: EditorWorkspaceProps) {
+function isEditableTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false
+  return target.isContentEditable || target.closest('input, textarea, select') !== null
+}
+
+function EditorWorkspace({ session, canSave, isSaving, statusMessage, isClosePromptOpen, onSave, onSaveAs, onDocumentChange }: EditorWorkspaceProps) {
   const canvasRef = useRef<HTMLDivElement>(null)
   const svgRef = useRef<SVGSVGElement>(null)
   const gestureRef = useRef<RectangleGesture | null>(null)
@@ -41,6 +47,7 @@ function EditorWorkspace({ session, canSave, isSaving, statusMessage, onSave, on
   const [mockActionMessage, setMockActionMessage] = useState('')
   const [activeTool, setActiveTool] = useState<ActiveTool>('select')
   const [preview, setPreview] = useState<NormalizedRectangle | null>(null)
+  const [selectedObjectId, setSelectedObjectId] = useState<string | null>(null)
   const { document } = session
   const { artboard } = document
   const fitScale = Math.min(
@@ -51,6 +58,7 @@ function EditorWorkspace({ session, canSave, isSaving, statusMessage, onSave, on
   const boardWidth = Math.max(0, artboard.width * scale)
   const boardHeight = Math.max(0, artboard.height * scale)
   const zoomLabel = scale > 0 ? `${Math.round(scale * 100)}%` : 'Fit'
+  const selectedObject = document.objects.find((object) => object.id === selectedObjectId) ?? null
 
   useEffect(() => {
     const element = canvasRef.current
@@ -154,6 +162,36 @@ function EditorWorkspace({ session, canSave, isSaving, statusMessage, onSave, on
   }, [])
 
   useEffect(() => {
+    if (selectedObjectId && !document.objects.some((object) => object.id === selectedObjectId)) {
+      setSelectedObjectId(null)
+    }
+  }, [document, selectedObjectId])
+
+  useEffect(() => {
+    const handleDelete = (event: KeyboardEvent) => {
+      if (
+        isClosePromptOpen || globalThis.document.querySelector('dialog[open]') ||
+        event.ctrlKey || event.metaKey || event.altKey || isEditableTarget(event.target)
+      ) return
+      if (event.key !== 'Delete' && event.key !== 'Backspace') return
+
+      event.preventDefault()
+      if (!selectedObjectId) return
+
+      if (!document.objects.some((object) => object.id === selectedObjectId)) {
+        setSelectedObjectId(null)
+        return
+      }
+
+      setSelectedObjectId(null)
+      onDocumentChange(removeObject(document, selectedObjectId))
+    }
+
+    globalThis.document.addEventListener('keydown', handleDelete)
+    return () => globalThis.document.removeEventListener('keydown', handleDelete)
+  }, [document, isClosePromptOpen, onDocumentChange, selectedObjectId])
+
+  useEffect(() => {
     if (activeTool === 'rectangle') return
     const gesture = gestureRef.current
     if (!gesture) return
@@ -164,7 +202,15 @@ function EditorWorkspace({ session, canSave, isSaving, statusMessage, onSave, on
   }, [activeTool])
 
   function handlePointerDown(event: ReactPointerEvent<SVGSVGElement>) {
-    if (activeTool !== 'rectangle' || event.button !== 0) return
+    if (event.button !== 0) return
+
+    if (activeTool === 'select') {
+      const point = pointerToArtboard(event.currentTarget, { x: event.clientX, y: event.clientY })
+      if (point) setSelectedObjectId(findTopmostRectangleAtPoint(document.objects, point))
+      return
+    }
+
+    if (activeTool !== 'rectangle') return
     const startClient = { x: event.clientX, y: event.clientY }
     const startArtboard = pointerToArtboard(event.currentTarget, startClient)
     if (!startArtboard) return
@@ -220,6 +266,36 @@ function EditorWorkspace({ session, canSave, isSaving, statusMessage, onSave, on
                     strokeWidth={object.strokeWidth}
                   />
                 ))}
+                {selectedObject && (
+                  <>
+                    <rect
+                      x={selectedObject.x}
+                      y={selectedObject.y}
+                      width={selectedObject.width}
+                      height={selectedObject.height}
+                      fill="none"
+                      stroke="#ffffff"
+                      strokeWidth={4}
+                      strokeDasharray="1 3"
+                      vectorEffect="non-scaling-stroke"
+                      pointerEvents="none"
+                      aria-hidden="true"
+                    />
+                    <rect
+                      x={selectedObject.x}
+                      y={selectedObject.y}
+                      width={selectedObject.width}
+                      height={selectedObject.height}
+                      fill="none"
+                      stroke="#000080"
+                      strokeWidth={1.5}
+                      strokeDasharray="4 3"
+                      vectorEffect="non-scaling-stroke"
+                      pointerEvents="none"
+                      aria-hidden="true"
+                    />
+                  </>
+                )}
                 {preview && preview.width > 0 && preview.height > 0 && (
                   <rect
                     x={preview.x}

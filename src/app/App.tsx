@@ -19,6 +19,7 @@ type AppProps = {
 function App({ projectAdapter }: AppProps) {
   const [screen, setScreen] = useState<'welcome' | 'new-project'>('welcome')
   const [session, setSession] = useState<ProjectSession | null>(null)
+  const [editorSessionVersion, setEditorSessionVersion] = useState(0)
   const [busy, setBusy] = useState(false)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -33,7 +34,8 @@ function App({ projectAdapter }: AppProps) {
     setClosePrompt(nextPrompt)
   }
 
-  function setActiveSession(nextSession: ProjectSession) {
+  function setActiveSession(nextSession: ProjectSession, resetEditorState = false) {
+    if (resetEditorState) setEditorSessionVersion((version) => version + 1)
     sessionRef.current = nextSession
     setSession(nextSession)
   }
@@ -91,7 +93,7 @@ function App({ projectAdapter }: AppProps) {
 
       // Build and validate the complete next session before replacing the active one.
       const nextSession = openProjectSession(selection.manifestText, selection.projectRoot)
-      setActiveSession(nextSession)
+      setActiveSession(nextSession, true)
     } catch (openError) {
       setError(openError instanceof Error ? openError.message : 'The project could not be opened.')
     } finally {
@@ -102,7 +104,7 @@ function App({ projectAdapter }: AppProps) {
   function createProject(width: number, height: number) {
     setError(null)
     setStatusMessage('')
-    setActiveSession(createUntitledProjectSession(width, height))
+    setActiveSession(createUntitledProjectSession(width, height), true)
   }
 
   function updateDocument(sourceProjectId: string, sourceDocumentId: string, document: SceneDocument) {
@@ -183,10 +185,12 @@ function App({ projectAdapter }: AppProps) {
     return (
       <>
         <EditorWorkspace
+          key={editorSessionVersion}
           session={session}
           canSave={Boolean(projectAdapter.saveProject)}
           isSaving={saving}
           statusMessage={error ?? statusMessage}
+          isClosePromptOpen={closePrompt !== null}
           onSave={() => void save('save')}
           onSaveAs={() => void save('save-as')}
           onDocumentChange={(document) => updateDocument(session.projectId, session.document.id, document)}

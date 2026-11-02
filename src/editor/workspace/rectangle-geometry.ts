@@ -1,3 +1,5 @@
+import type { SceneObject } from '../../core/document/scene-document'
+
 export type Point = { x: number; y: number }
 
 export type AffineTransform = {
@@ -35,4 +37,16 @@ export function normalizeRectangle(start: Point, end: Point): NormalizedRectangl
 export function isGestureLongEnough(start: Point, end: Point, minimumCssPixels = 2): boolean {
   if (![start.x, start.y, end.x, end.y, minimumCssPixels].every(Number.isFinite)) return false
   return Math.hypot(end.x - start.x, end.y - start.y) >= minimumCssPixels
+}
+
+export function findTopmostRectangleAtPoint(objects: SceneObject[], point: Point): string | null {
+  for (let index = objects.length - 1; index >= 0; index -= 1) {
+    const object = objects[index]
+    if (
+      point.x >= object.x && point.x <= object.x + object.width &&
+      point.y >= object.y && point.y <= object.y + object.height
+    ) return object.id
+  }
+
+  return null
 }

@@ -97,6 +97,17 @@ export function addRectangle(document: SceneDocument, geometry: RectangleGeometr
   })
 }
 
+export function removeObject(document: SceneDocument, objectId: string): SceneDocument {
+  if (!document.objects.some((object) => object.id === objectId)) {
+    throw new DocumentValidationError(`Object "${objectId}" does not exist.`)
+  }
+
+  return validateSceneDocument({
+    ...document,
+    objects: document.objects.filter((object) => object.id !== objectId),
+  })
+}
+
 export function validateSceneDocument(value: unknown): SceneDocument {
   if (!isRecord(value)) throw new DocumentValidationError('The scene must be an object.')
   if (value.schemaVersion !== SCENE_SCHEMA_VERSION) {

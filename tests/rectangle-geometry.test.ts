@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { isGestureLongEnough, normalizeRectangle, transformPoint, type Point } from '../src/editor/workspace/rectangle-geometry'
+import { addRectangle, createSceneDocument } from '../src/core/document/scene-document'
+import { findTopmostRectangleAtPoint, isGestureLongEnough, normalizeRectangle, transformPoint, type Point } from '../src/editor/workspace/rectangle-geometry'
 
 test('normalizeRectangle handles all four drag directions', () => {
   const drags: [Point, Point][] = [
@@ -32,4 +33,13 @@ test('inverse SVG transforms map screen points at different view scales', () => 
     { a: 2, b: 0, c: 0, d: 2, e: -20, f: -20 },
   )
   assert.deepEqual(zoomedOut, { x: 20, y: 20 })
+})
+
+test('rectangle hit testing returns the topmost overlapping object and ignores empty space', () => {
+  const first = addRectangle(createSceneDocument(800, 600), { x: 10, y: 10, width: 40, height: 40 })
+  const scene = addRectangle(first, { x: 20, y: 20, width: 40, height: 40 })
+
+  assert.equal(findTopmostRectangleAtPoint(scene.objects, { x: 25, y: 25 }), scene.objects[1].id)
+  assert.equal(findTopmostRectangleAtPoint(scene.objects, { x: 15, y: 15 }), scene.objects[0].id)
+  assert.equal(findTopmostRectangleAtPoint(scene.objects, { x: 100, y: 100 }), null)
 })

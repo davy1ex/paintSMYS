@@ -7,7 +7,7 @@ import { saveProjectAsFolder, saveExistingProjectFolder, readProjectFolder } fro
 import { mergeSavedProjectSession, saveProjectSession } from '../src/application/save-project-session'
 import type { ProjectSavePort, ProjectSaveRequest } from '../src/application/project-save-port'
 import { createUntitledProjectSession, openProjectSession, updateProjectSessionDocument, type ProjectSession } from '../src/application/project-session'
-import { addRectangle } from '../src/core/document/scene-document'
+import { addRectangle, removeObject } from '../src/core/document/scene-document'
 import { parseProjectManifest } from '../src/core/project/project-manifest'
 
 async function withTempDirectory(run: (directory: string) => Promise<void>) {
@@ -87,6 +87,39 @@ test('New Project draws one Rectangle, becomes dirty, then Save and Open restore
   })
 })
 
+test('delete after Save marks the session dirty and a second Save keeps the object deleted after Open', async () => {
+  await withTempDirectory(async (directory) => {
+    const target = join(directory, 'Delete flow')
+    const initial = createUntitledProjectSession(800, 600)
+    const withFirst = addRectangle(initial.document, { x: 10, y: 20, width: 80, height: 40 })
+    const withTwoRectangles = addRectangle(withFirst, { x: 120, y: 140, width: 50, height: 30 })
+    const savedBeforeDelete = await saveProjectSession(
+      updateProjectSessionDocument(initial, withTwoRectangles),
+      diskSavePort(target),
+    )
+    assert.equal(savedBeforeDelete.status, 'saved')
+    if (savedBeforeDelete.status !== 'saved') return
+
+    const removedId = withTwoRectangles.objects[1].id
+    const afterDelete = updateProjectSessionDocument(
+      savedBeforeDelete.session,
+      removeObject(savedBeforeDelete.session.document, removedId),
+    )
+    assert.equal(afterDelete.isDirty, true)
+    assert.deepEqual(afterDelete.document.objects.map((object) => object.id), [withTwoRectangles.objects[0].id])
+
+    const savedAfterDelete = await saveProjectSession(afterDelete, diskSavePort(target))
+    assert.equal(savedAfterDelete.status, 'saved')
+    if (savedAfterDelete.status !== 'saved') return
+    assert.equal(savedAfterDelete.session.isDirty, false)
+
+    const { manifestText } = await readProjectFolder(target)
+    const reopened = openProjectSession(manifestText, target)
+    assert.deepEqual(reopened.document.objects.map((object) => object.id), [withTwoRectangles.objects[0].id])
+    assert.deepEqual(reopened.document.artboard, initial.document.artboard)
+  })
+})
+
 test('repeat Save reuses projectRoot while Save As creates a distinct project', async () => {
   await withTempDirectory(async (directory) => {
     const parent = join(directory, 'projects')
@@ -143,6 +176,27 @@ test('a completed write cannot mark a newer document version as saved', async ()
   assert.equal(merged?.document, newer.document)
   assert.equal(merged?.isDirty, true)
   assert.equal(mergeSavedProjectSession(snapshot, null, savedSnapshot), null)
+})
+
+test('deleting an object while Save is in flight keeps the newer document dirty', async () => {
+  const initial = createUntitledProjectSession(800, 600)
+  const withRectangle = addRectangle(initial.document, { x: 10, y: 20, width: 80, height: 40 })
+  const snapshot = updateProjectSessionDocument(initial, withRectangle)
+  let finishWrite: ((result: { status: 'saved'; projectRoot: string; projectName: string }) => void) | undefined
+  const saveInFlight = saveProjectSession(snapshot, {
+    saveProject: () => new Promise((resolve) => { finishWrite = resolve }),
+  })
+
+  const afterDelete = updateProjectSessionDocument(snapshot, removeObject(snapshot.document, withRectangle.objects[0].id))
+  finishWrite?.({ status: 'saved', projectRoot: '/project', projectName: 'Project' })
+  const writeResult = await saveInFlight
+  assert.equal(writeResult.status, 'saved')
+  if (writeResult.status !== 'saved') return
+
+  const merged = mergeSavedProjectSession(snapshot, afterDelete, writeResult.session)
+  assert.equal(merged?.document, afterDelete.document)
+  assert.equal(merged?.document.objects.length, 0)
+  assert.equal(merged?.isDirty, true)
 })
 
 test('Save As refuses an existing project without consent and does not replace its manifest', async () => {
