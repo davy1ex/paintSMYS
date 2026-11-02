@@ -1,6 +1,6 @@
 # paintSMYS
 
-Локальный объектный графический редактор. Продуктовые требования и целевая архитектура описаны в [`docs/PRD.md`](docs/PRD.md) и [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
+Локальный объектный графический редактор. Ближайшая продуктовая цель — первый внешний плагин; roadmap, продуктовые требования и целевая архитектура описаны в [`docs/ROADMAP.md`](docs/ROADMAP.md), [`docs/PRD.md`](docs/PRD.md) и [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
 `src/app` содержит Electron main/preload, browser entrypoint и общий React App. `src/editor` — общий UI редактора. Electron и Browser собираются отдельно из корневого `index.html`.
 
@@ -14,6 +14,8 @@ npm run dev:desktop
 ```
 
 Для Web App запусти `npm run dev:web` в отдельном терминале.
+
+Web-версия открывает папку, в корне которой находится `project.json`, через файловый диалог браузера. Если Windows-браузер отклоняет путь `\\wsl.localhost\...` как системную папку, выбери копию проекта в обычной папке Windows, например `Documents`. Для проекта, который остаётся в файловой системе WSL, используй Desktop-версию.
 
 ## Сборка
 
