@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
-import { addRectangle, removeObject, type RectangleGeometry, type SceneDocument } from '../../core/document/scene-document'
+import { addRectangle, moveObject, removeObject, type RectangleGeometry, type SceneDocument, type SceneObject } from '../../core/document/scene-document'
 import type { ProjectSession } from '../../application/project-session'
 import type { ProjectSaveMode } from '../../application/project-save-port'
-import { findTopmostRectangleAtPoint, isGestureLongEnough, normalizeRectangle, transformPoint, type NormalizedRectangle, type Point } from './rectangle-geometry'
+import { findTopmostRectangleAtPoint, isGestureLongEnough, normalizeRectangle, transformPoint, transformVector, translateRectangle, type NormalizedRectangle, type Point } from './rectangle-geometry'
 import EditorMenuBar from './EditorMenuBar'
 import ToolPanel from './ToolPanel'
 import './editor-workspace.css'
@@ -24,18 +24,52 @@ type EditorWorkspaceProps = {
   onDocumentChange: (previousDocument: SceneDocument, document: SceneDocument) => void
 }
 
-type RectangleGesture = {
+type GestureBase = {
   pointerId: number
   pointerType: string
-  startArtboard: Point
+  projectId: string
+  sourceDocument: SceneDocument
   startClient: Point
   lastClient: Point
 }
+
+type RectangleDrawGesture = GestureBase & {
+  kind: 'draw'
+  startArtboard: Point
+}
+
+type RectangleMoveGesture = GestureBase & {
+  kind: 'move'
+  objectId: string
+  originalX: number
+  originalY: number
+  sceneDelta: Point
+}
+
+type RectangleGesture = RectangleDrawGesture | RectangleMoveGesture
 
 function pointerToArtboard(svg: SVGSVGElement, point: Point): Point | null {
   const screenTransform = svg.getScreenCTM()
   if (!screenTransform) return null
   return transformPoint(point, screenTransform.inverse())
+}
+
+function pointerDeltaToArtboard(svg: SVGSVGElement, delta: Point): Point | null {
+  const screenTransform = svg.getScreenCTM()
+  if (!screenTransform) return null
+  return transformVector(delta, screenTransform.inverse())
+}
+
+function findObjectAtClientPoint(svg: SVGSVGElement | null, objects: SceneObject[], clientPoint: Point): string | null {
+  if (!svg) return null
+  const bounds = svg.getBoundingClientRect()
+  if (
+    clientPoint.x < bounds.left || clientPoint.x > bounds.right ||
+    clientPoint.y < bounds.top || clientPoint.y > bounds.bottom
+  ) return null
+
+  const scenePoint = pointerToArtboard(svg, clientPoint)
+  return scenePoint ? findTopmostRectangleAtPoint(objects, scenePoint) : null
 }
 
 function isEditableTarget(target: EventTarget | null): boolean {
@@ -60,10 +94,14 @@ function EditorWorkspace({
   const canvasRef = useRef<HTMLDivElement>(null)
   const svgRef = useRef<SVGSVGElement>(null)
   const gestureRef = useRef<RectangleGesture | null>(null)
+  const pointerClientRef = useRef<Point | null>(null)
   const [viewportSize, setViewportSize] = useState({ width: 0, height: 0 })
   const [mockActionMessage, setMockActionMessage] = useState('')
   const [activeTool, setActiveTool] = useState<ActiveTool>('select')
   const [preview, setPreview] = useState<NormalizedRectangle | null>(null)
+  const [movePreview, setMovePreview] = useState<{ objectId: string; x: number; y: number } | null>(null)
+  const [hoveredObjectId, setHoveredObjectId] = useState<string | null>(null)
+  const [isMovingObject, setIsMovingObject] = useState(false)
   const [selectedObjectId, setSelectedObjectId] = useState<string | null>(null)
   const { document } = session
   const { artboard } = document
@@ -124,37 +162,95 @@ function EditorWorkspace({
   }, [canRedo, canSave, canUndo, isClosePromptOpen, isSaving, onRedo, onSave, onUndo])
 
   useEffect(() => {
+    const updateHover = (clientPoint: Point, objects: SceneObject[] = document.objects) => {
+      const objectId = activeTool === 'select'
+        ? findObjectAtClientPoint(svgRef.current, objects, clientPoint)
+        : null
+      setHoveredObjectId(objectId)
+    }
+
     const updatePreview = (clientX: number, clientY: number, pointerId?: number) => {
       const gesture = gestureRef.current
       const svg = svgRef.current
       if (!gesture || !svg || (pointerId !== undefined && gesture.pointerId !== pointerId)) return
       if (gesture.lastClient.x === clientX && gesture.lastClient.y === clientY) return
-      gesture.lastClient = { x: clientX, y: clientY }
-      const end = pointerToArtboard(svg, { x: clientX, y: clientY })
-      if (end) setPreview(normalizeRectangle(gesture.startArtboard, end))
+      const nextClient = { x: clientX, y: clientY }
+
+      if (gesture.kind === 'draw') {
+        gesture.lastClient = nextClient
+        const end = pointerToArtboard(svg, nextClient)
+        if (end) setPreview(normalizeRectangle(gesture.startArtboard, end))
+        return
+      }
+
+      const sceneDelta = pointerDeltaToArtboard(svg, {
+        x: clientX - gesture.lastClient.x,
+        y: clientY - gesture.lastClient.y,
+      })
+      if (!sceneDelta) return
+      gesture.lastClient = nextClient
+      gesture.sceneDelta = {
+        x: gesture.sceneDelta.x + sceneDelta.x,
+        y: gesture.sceneDelta.y + sceneDelta.y,
+      }
+      if (isGestureLongEnough(gesture.startClient, nextClient)) {
+        const position = translateRectangle(
+          { x: gesture.originalX, y: gesture.originalY },
+          gesture.sceneDelta,
+        )
+        setMovePreview({ objectId: gesture.objectId, ...position })
+      } else {
+        setMovePreview(null)
+      }
     }
 
     const finishGesture = (clientX: number, clientY: number, pointerId?: number) => {
       const gesture = gestureRef.current
       const svg = svgRef.current
       if (!gesture || !svg || (pointerId !== undefined && gesture.pointerId !== pointerId)) return
-      const end = pointerToArtboard(svg, { x: clientX, y: clientY })
+      pointerClientRef.current = { x: clientX, y: clientY }
+      updatePreview(clientX, clientY, pointerId)
       gestureRef.current = null
       setPreview(null)
-      if (!end || !isGestureLongEnough(gesture.startClient, { x: clientX, y: clientY })) return
+      setMovePreview(null)
 
+      if (gesture.kind === 'move') {
+        const shouldMove = isGestureLongEnough(gesture.startClient, { x: clientX, y: clientY })
+        setIsMovingObject(false)
+        const moved = shouldMove
+          ? moveObject(document, gesture.objectId, {
+            x: gesture.originalX + gesture.sceneDelta.x,
+            y: gesture.originalY + gesture.sceneDelta.y,
+          })
+          : document
+        updateHover({ x: clientX, y: clientY }, moved.objects)
+        if (moved !== document) onDocumentChange(document, moved)
+        return
+      }
+
+      setIsMovingObject(false)
+      setHoveredObjectId(null)
+      if (!isGestureLongEnough(gesture.startClient, { x: clientX, y: clientY })) return
+
+      const end = pointerToArtboard(svg, { x: clientX, y: clientY })
+      if (!end) return
       const rectangle: RectangleGeometry = normalizeRectangle(gesture.startArtboard, end)
       if (rectangle.width <= 0 || rectangle.height <= 0 || !Object.values(rectangle).every(Number.isFinite)) return
       onDocumentChange(document, addRectangle(document, rectangle))
     }
 
     const handlePointerMove = (event: PointerEvent) => {
-      updatePreview(event.clientX, event.clientY, event.pointerId)
+      const clientPoint = { x: event.clientX, y: event.clientY }
+      pointerClientRef.current = clientPoint
+      if (gestureRef.current) updatePreview(event.clientX, event.clientY, event.pointerId)
+      else if (event.pointerType !== 'touch') updateHover(clientPoint)
     }
 
     const handleMouseMove = (event: MouseEvent) => {
-      if (gestureRef.current?.pointerType !== 'mouse') return
-      updatePreview(event.clientX, event.clientY)
+      const clientPoint = { x: event.clientX, y: event.clientY }
+      pointerClientRef.current = clientPoint
+      if (gestureRef.current?.pointerType === 'mouse') updatePreview(event.clientX, event.clientY)
+      else if (!gestureRef.current) updateHover(clientPoint)
     }
 
     const handlePointerUp = (event: PointerEvent) => {
@@ -167,13 +263,18 @@ function EditorWorkspace({
     }
 
     const handlePointerCancel = (event: PointerEvent) => {
-      if (gestureRef.current?.pointerId !== event.pointerId) return
+      const gesture = gestureRef.current
+      if (gesture?.pointerId !== event.pointerId) return
       gestureRef.current = null
       setPreview(null)
+      setMovePreview(null)
+      setIsMovingObject(false)
+      pointerClientRef.current = gesture.lastClient
+      updateHover(gesture.lastClient)
     }
 
-    // Listen at window level so the captured drag keeps updating even when the
-    // pointer leaves the SVG. Mouse drags use mouse events; pen and touch use pointers.
+    // Listen at window level so pointer capture keeps updating outside the SVG.
+    // Mouse events remain as a fallback for hosts that do not dispatch Pointer Events.
     globalThis.window.addEventListener('pointermove', handlePointerMove, true)
     globalThis.window.addEventListener('pointerup', handlePointerUp, true)
     globalThis.window.addEventListener('pointercancel', handlePointerCancel, true)
@@ -186,22 +287,65 @@ function EditorWorkspace({
       globalThis.window.removeEventListener('mousemove', handleMouseMove, true)
       globalThis.window.removeEventListener('mouseup', handleMouseUp, true)
     }
-  }, [document, onDocumentChange])
+  }, [activeTool, document, onDocumentChange])
 
   useEffect(() => {
-    const cancelDrawing = (event: KeyboardEvent) => {
+    const cancelGesture = (event: KeyboardEvent) => {
       if (event.key !== 'Escape') return
       const gesture = gestureRef.current
       if (!gesture) return
       event.preventDefault()
       gestureRef.current = null
       setPreview(null)
+      setMovePreview(null)
+      setIsMovingObject(false)
+      pointerClientRef.current = gesture.lastClient
+      setHoveredObjectId(activeTool === 'select'
+        ? findObjectAtClientPoint(svgRef.current, document.objects, gesture.lastClient)
+        : null)
       const svg = svgRef.current
       if (svg?.hasPointerCapture(gesture.pointerId)) svg.releasePointerCapture(gesture.pointerId)
     }
-    globalThis.document.addEventListener('keydown', cancelDrawing)
-    return () => globalThis.document.removeEventListener('keydown', cancelDrawing)
+    globalThis.document.addEventListener('keydown', cancelGesture)
+    return () => globalThis.document.removeEventListener('keydown', cancelGesture)
+  }, [activeTool, document])
+
+  useEffect(() => {
+    if (!isMovingObject) return
+    const body = globalThis.document.body
+    body.classList.add('editor-workspace--moving')
+    return () => body.classList.remove('editor-workspace--moving')
+  }, [isMovingObject])
+
+  useEffect(() => () => {
+    const gesture = gestureRef.current
+    gestureRef.current = null
+    const svg = svgRef.current
+    if (gesture && svg?.hasPointerCapture(gesture.pointerId)) svg.releasePointerCapture(gesture.pointerId)
   }, [])
+
+  useEffect(() => {
+    const gesture = gestureRef.current
+    const gestureUsesActiveTool = !gesture || (gesture.kind === 'draw'
+      ? activeTool === 'rectangle'
+      : activeTool === 'select')
+    const gestureUsesCurrentSession = !gesture || (
+      gesture.projectId === session.projectId && gesture.sourceDocument === document
+    )
+    if (gesture && (!gestureUsesActiveTool || !gestureUsesCurrentSession)) {
+      gestureRef.current = null
+      setPreview(null)
+      setMovePreview(null)
+      setIsMovingObject(false)
+      const svg = svgRef.current
+      if (svg?.hasPointerCapture(gesture.pointerId)) svg.releasePointerCapture(gesture.pointerId)
+    }
+
+    const clientPoint = pointerClientRef.current
+    setHoveredObjectId(activeTool === 'select' && clientPoint
+      ? findObjectAtClientPoint(svgRef.current, document.objects, clientPoint)
+      : null)
+  }, [activeTool, document, session.projectId])
 
   useEffect(() => {
     if (selectedObjectId && !document.objects.some((object) => object.id === selectedObjectId)) {
@@ -233,33 +377,71 @@ function EditorWorkspace({
     return () => globalThis.document.removeEventListener('keydown', handleDelete)
   }, [document, isClosePromptOpen, onDocumentChange, selectedObjectId])
 
-  useEffect(() => {
-    if (activeTool === 'rectangle') return
-    const gesture = gestureRef.current
-    if (!gesture) return
-    gestureRef.current = null
-    setPreview(null)
-    const svg = svgRef.current
-    if (svg?.hasPointerCapture(gesture.pointerId)) svg.releasePointerCapture(gesture.pointerId)
-  }, [activeTool])
-
   function handlePointerDown(event: ReactPointerEvent<SVGSVGElement>) {
-    if (event.button !== 0) return
+    if (event.button !== 0 || !event.isPrimary || gestureRef.current) return
+    const startClient = { x: event.clientX, y: event.clientY }
+    pointerClientRef.current = startClient
 
     if (activeTool === 'select') {
-      const point = pointerToArtboard(event.currentTarget, { x: event.clientX, y: event.clientY })
-      if (point) setSelectedObjectId(findTopmostRectangleAtPoint(document.objects, point))
+      const objectId = findObjectAtClientPoint(event.currentTarget, document.objects, startClient)
+      setSelectedObjectId(objectId)
+      setHoveredObjectId(objectId)
+      setPreview(null)
+      setMovePreview(null)
+      setIsMovingObject(Boolean(objectId))
+      if (!objectId) return
+
+      const object = document.objects.find((candidate) => candidate.id === objectId)
+      if (!object) return
+      gestureRef.current = {
+        kind: 'move',
+        pointerId: event.pointerId,
+        pointerType: event.pointerType,
+        projectId: session.projectId,
+        sourceDocument: document,
+        objectId,
+        originalX: object.x,
+        originalY: object.y,
+        startClient,
+        lastClient: startClient,
+        sceneDelta: { x: 0, y: 0 },
+      }
+      event.currentTarget.setPointerCapture(event.pointerId)
       return
     }
 
     if (activeTool !== 'rectangle') return
-    const startClient = { x: event.clientX, y: event.clientY }
     const startArtboard = pointerToArtboard(event.currentTarget, startClient)
     if (!startArtboard) return
 
-    gestureRef.current = { pointerId: event.pointerId, pointerType: event.pointerType, startArtboard, startClient, lastClient: startClient }
+    setHoveredObjectId(null)
+    setIsMovingObject(false)
+    gestureRef.current = {
+      kind: 'draw',
+      pointerId: event.pointerId,
+      pointerType: event.pointerType,
+      projectId: session.projectId,
+      sourceDocument: document,
+      startArtboard,
+      startClient,
+      lastClient: startClient,
+    }
     setPreview(null)
+    setMovePreview(null)
     event.currentTarget.setPointerCapture(event.pointerId)
+  }
+
+  function handleLostPointerCapture(event: ReactPointerEvent<SVGSVGElement>) {
+    const gesture = gestureRef.current
+    if (gesture?.pointerId !== event.pointerId) return
+    gestureRef.current = null
+    setPreview(null)
+    setMovePreview(null)
+    setIsMovingObject(false)
+    pointerClientRef.current = gesture.lastClient
+    setHoveredObjectId(activeTool === 'select'
+      ? findObjectAtClientPoint(svgRef.current, document.objects, gesture.lastClient)
+      : null)
   }
 
   return (
@@ -287,36 +469,40 @@ function EditorWorkspace({
         <section className="editor-stage" aria-label="Artboard workspace">
           <div className="editor-canvas-wrap" ref={canvasRef}>
             <div
-              className={`editor-artboard${activeTool === 'rectangle' ? ' editor-artboard--drawing' : ''}`}
+              className={`editor-artboard${activeTool === 'rectangle' ? ' editor-artboard--drawing' : ''}${activeTool === 'select' && hoveredObjectId ? ' editor-artboard--move-target' : ''}${isMovingObject ? ' editor-artboard--moving' : ''}`}
               aria-label={`Artboard ${artboard.width} by ${artboard.height} pixels`}
               style={{ width: boardWidth, height: boardHeight }}
             >
               <svg
                 ref={svgRef}
-                className="scene-svg"
+                className={`scene-svg${activeTool === 'rectangle' ? ' scene-svg--drawing' : ''}${activeTool === 'select' && hoveredObjectId ? ' scene-svg--move-target' : ''}${isMovingObject ? ' scene-svg--moving' : ''}`}
                 viewBox={`0 0 ${artboard.width} ${artboard.height}`}
                 role="img"
                 aria-label="Scene contents"
                 onPointerDown={handlePointerDown}
+                onLostPointerCapture={handleLostPointerCapture}
               >
                 <rect width={artboard.width} height={artboard.height} fill={artboard.backgroundColor} />
-                {document.objects.map((object) => (
-                  <rect
-                    key={object.id}
-                    x={object.x}
-                    y={object.y}
-                    width={object.width}
-                    height={object.height}
-                    fill={object.fill}
-                    stroke={object.stroke}
-                    strokeWidth={object.strokeWidth}
-                  />
-                ))}
+                {document.objects.map((object) => {
+                  const position = movePreview?.objectId === object.id ? movePreview : object
+                  return (
+                    <rect
+                      key={object.id}
+                      x={position.x}
+                      y={position.y}
+                      width={object.width}
+                      height={object.height}
+                      fill={object.fill}
+                      stroke={object.stroke}
+                      strokeWidth={object.strokeWidth}
+                    />
+                  )
+                })}
                 {selectedObject && (
                   <>
                     <rect
-                      x={selectedObject.x}
-                      y={selectedObject.y}
+                      x={movePreview?.objectId === selectedObject.id ? movePreview.x : selectedObject.x}
+                      y={movePreview?.objectId === selectedObject.id ? movePreview.y : selectedObject.y}
                       width={selectedObject.width}
                       height={selectedObject.height}
                       fill="none"
@@ -328,8 +514,8 @@ function EditorWorkspace({
                       aria-hidden="true"
                     />
                     <rect
-                      x={selectedObject.x}
-                      y={selectedObject.y}
+                      x={movePreview?.objectId === selectedObject.id ? movePreview.x : selectedObject.x}
+                      y={movePreview?.objectId === selectedObject.id ? movePreview.y : selectedObject.y}
                       width={selectedObject.width}
                       height={selectedObject.height}
                       fill="none"

@@ -30,6 +30,7 @@ export type SceneDocument = {
 }
 
 export type RectangleGeometry = Pick<RectangleObject, 'x' | 'y' | 'width' | 'height'>
+export type ObjectPosition = Pick<RectangleObject, 'x' | 'y'>
 
 export class DocumentValidationError extends Error {
   constructor(message: string) {
@@ -106,6 +107,23 @@ export function removeObject(document: SceneDocument, objectId: string): SceneDo
     ...document,
     objects: document.objects.filter((object) => object.id !== objectId),
   })
+}
+
+export function moveObject(document: SceneDocument, objectId: string, nextPosition: ObjectPosition): SceneDocument {
+  const objectIndex = document.objects.findIndex((object) => object.id === objectId)
+  if (objectIndex === -1) {
+    throw new DocumentValidationError(`Object "${objectId}" does not exist.`)
+  }
+
+  const object = document.objects[objectIndex]
+  if (object.x === nextPosition.x && object.y === nextPosition.y) {
+    validateSceneDocument(document)
+    return document
+  }
+
+  const objects = document.objects.slice()
+  objects[objectIndex] = { ...object, x: nextPosition.x, y: nextPosition.y }
+  return validateSceneDocument({ ...document, objects })
 }
 
 export function validateSceneDocument(value: unknown): SceneDocument {

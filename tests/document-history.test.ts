@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { DocumentHistory } from '../src/application/document-history'
-import { saveProjectSession } from '../src/application/save-project-session'
+import { mergeSavedProjectSession, saveProjectSession } from '../src/application/save-project-session'
 import { createUntitledProjectSession, openProjectSession, updateProjectSessionDocument } from '../src/application/project-session'
-import { addRectangle, createSceneDocument, removeObject, type SceneDocument } from '../src/core/document/scene-document'
+import { addRectangle, createSceneDocument, moveObject, removeObject, type SceneDocument } from '../src/core/document/scene-document'
 
 function withRectangle(document: SceneDocument, x: number) {
   return addRectangle(document, { x, y: 10, width: 20, height: 15 })
@@ -33,6 +33,35 @@ test('Undo and Redo restore immutable snapshots with IDs and object order intact
   assert.equal(history.canRedo, true)
   assert.equal(history.redo(first), second)
   assert.deepEqual(second.objects.map((object) => object.id), [first.objects[0].id, second.objects[1].id])
+})
+
+test('one rectangle move creates one Undo entry and supports Redo', () => {
+  const saved = withRectangle(createSceneDocument(800, 600), 10)
+  const rectangle = saved.objects[0]
+  const moved = moveObject(saved, rectangle.id, { x: 70, y: 90 })
+  const history = new DocumentHistory(saved)
+
+  assert.equal(history.recordChange(saved, moved), true)
+  assert.equal(history.recordChange(moved, moveObject(moved, rectangle.id, { x: 70, y: 90 })), false)
+  assert.equal(history.undo(moved), saved)
+  assert.equal(history.canUndo, false)
+  assert.equal(history.isDirty(saved), false)
+  assert.equal(history.redo(saved), moved)
+  assert.equal(history.isDirty(moved), true)
+})
+
+test('moving, saving, Undo, and Redo track the saved position as the dirty baseline', () => {
+  const initial = withRectangle(createSceneDocument(800, 600), 10)
+  const rectangle = initial.objects[0]
+  const moved = moveObject(initial, rectangle.id, { x: 60, y: 80 })
+  const history = new DocumentHistory(initial)
+  history.recordChange(initial, moved)
+  history.markSaved(moved)
+
+  assert.equal(history.undo(moved), initial)
+  assert.equal(history.isDirty(initial), true)
+  assert.equal(history.redo(initial), moved)
+  assert.equal(history.isDirty(moved), false)
 })
 
 test('a new edit after Undo clears Redo and a no-op creates no history entry', () => {
@@ -162,6 +191,33 @@ test('a snapshot saved during later edits becomes the baseline, and Undo back to
   assert.equal(history.isDirty(documentB), true)
   assert.equal(history.undo(documentB), documentA)
   assert.equal(history.isDirty(documentA), false)
+})
+
+test('a Save in flight cannot replace a later rectangle position', async () => {
+  const session = createUntitledProjectSession(800, 600)
+  const withRectangle = addRectangle(session.document, { x: 10, y: 20, width: 40, height: 30 })
+  const savedSnapshot = updateProjectSessionDocument(session, withRectangle)
+  const history = new DocumentHistory()
+  history.recordChange(session.document, withRectangle)
+  let finishWrite: ((result: { status: 'saved'; projectRoot: string; projectName: string }) => void) | undefined
+  const savePromise = saveProjectSession(savedSnapshot, {
+    saveProject: () => new Promise((resolve) => { finishWrite = resolve }),
+  })
+
+  const moved = moveObject(withRectangle, withRectangle.objects[0].id, { x: 90, y: 110 })
+  history.recordChange(withRectangle, moved)
+  const currentSession = updateProjectSessionDocument(savedSnapshot, moved)
+  finishWrite?.({ status: 'saved', projectRoot: '/project', projectName: 'Project' })
+  const writeResult = await savePromise
+
+  assert.equal(writeResult.status, 'saved')
+  if (writeResult.status !== 'saved') return
+  const merged = mergeSavedProjectSession(savedSnapshot, currentSession, writeResult.session)
+  history.markSaved(savedSnapshot.document)
+  assert.equal(merged?.document, moved)
+  assert.equal(merged?.isDirty, true)
+  assert.equal(history.undo(moved), withRectangle)
+  assert.equal(history.isDirty(withRectangle), false)
 })
 
 test('saving one session does not change another session history baseline', () => {

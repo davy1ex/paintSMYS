@@ -25,6 +25,17 @@ export function transformPoint(point: Point, matrix: AffineTransform): Point {
   }
 }
 
+export function transformVector(vector: Point, matrix: AffineTransform): Point {
+  return {
+    x: matrix.a * vector.x + matrix.c * vector.y,
+    y: matrix.b * vector.x + matrix.d * vector.y,
+  }
+}
+
+export function translateRectangle<T extends Pick<SceneObject, 'x' | 'y'>>(rectangle: T, delta: Point): T {
+  return { ...rectangle, x: rectangle.x + delta.x, y: rectangle.y + delta.y }
+}
+
 export function normalizeRectangle(start: Point, end: Point): NormalizedRectangle {
   return {
     x: Math.min(start.x, end.x),

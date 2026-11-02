@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { addRectangle, createSceneDocument } from '../src/core/document/scene-document'
-import { findTopmostRectangleAtPoint, isGestureLongEnough, normalizeRectangle, transformPoint, type Point } from '../src/editor/workspace/rectangle-geometry'
+import { findTopmostRectangleAtPoint, isGestureLongEnough, normalizeRectangle, transformPoint, transformVector, translateRectangle, type Point } from '../src/editor/workspace/rectangle-geometry'
 
 test('normalizeRectangle handles all four drag directions', () => {
   const drags: [Point, Point][] = [
@@ -35,6 +35,41 @@ test('inverse SVG transforms map screen points at different view scales', () => 
   assert.deepEqual(zoomedOut, { x: 20, y: 20 })
 })
 
+test('client movement is converted to scene deltas at different SVG scales', () => {
+  const atHalfScale = transformVector(
+    { x: 24, y: -12 },
+    { a: 2, b: 0, c: 0, d: 2, e: -200, f: 80 },
+  )
+  const atQuarterScale = transformVector(
+    { x: 24, y: -12 },
+    { a: 4, b: 0, c: 0, d: 4, e: 50, f: 120 },
+  )
+
+  assert.deepEqual(atHalfScale, { x: 48, y: -24 })
+  assert.deepEqual(atQuarterScale, { x: 96, y: -48 })
+})
+
+test('rectangle translation preserves the cursor offset in every direction', () => {
+  const rectangle = { x: 20, y: 30, width: 40, height: 25 }
+  const startPointer = { x: 27, y: 34 }
+  const pointerOffset = { x: startPointer.x - rectangle.x, y: startPointer.y - rectangle.y }
+  const movements: Point[] = [
+    { x: 12, y: 0 },
+    { x: -12, y: 0 },
+    { x: 0, y: 12 },
+    { x: 0, y: -12 },
+  ]
+
+  for (const movement of movements) {
+    const moved = translateRectangle(rectangle, movement)
+    const endPointer = { x: startPointer.x + movement.x, y: startPointer.y + movement.y }
+    assert.deepEqual(
+      { x: endPointer.x - moved.x, y: endPointer.y - moved.y },
+      pointerOffset,
+    )
+  }
+})
+
 test('rectangle hit testing returns the topmost overlapping object and ignores empty space', () => {
   const first = addRectangle(createSceneDocument(800, 600), { x: 10, y: 10, width: 40, height: 40 })
   const scene = addRectangle(first, { x: 20, y: 20, width: 40, height: 40 })
@@ -43,3 +78,4 @@ test('rectangle hit testing returns the topmost overlapping object and ignores e
   assert.equal(findTopmostRectangleAtPoint(scene.objects, { x: 15, y: 15 }), scene.objects[0].id)
   assert.equal(findTopmostRectangleAtPoint(scene.objects, { x: 100, y: 100 }), null)
 })
+

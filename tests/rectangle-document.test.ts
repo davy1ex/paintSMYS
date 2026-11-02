@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { addRectangle, createSceneDocument, DocumentValidationError, removeObject } from '../src/core/document/scene-document'
+import { addRectangle, createSceneDocument, DocumentValidationError, moveObject, removeObject } from '../src/core/document/scene-document'
 
 test('addRectangle returns a valid immutable scene and preserves object order', () => {
   const original = createSceneDocument(800, 600)
@@ -61,4 +61,37 @@ test('removeObject reports an unknown ID without changing the source document', 
 
   assert.throws(() => removeObject(original, 'missing-object'), DocumentValidationError)
   assert.deepEqual(original, before)
+})
+
+test('moveObject changes only the selected rectangle position and preserves order and source', () => {
+  const original = addRectangle(createSceneDocument(800, 600), { x: 10, y: 20, width: 80, height: 40 })
+  const withSecond = addRectangle(original, { x: 120, y: 140, width: 50, height: 30 })
+  const before = structuredClone(withSecond)
+  const [first, second] = withSecond.objects
+
+  const moved = moveObject(withSecond, first.id, { x: -5, y: 75 })
+
+  assert.notEqual(moved, withSecond)
+  assert.deepEqual(withSecond, before)
+  assert.deepEqual(moved.objects.map((object) => object.id), [first.id, second.id])
+  assert.deepEqual(moved.objects[0], { ...first, x: -5, y: 75 })
+  assert.deepEqual(moved.objects[1], second)
+  assert.deepEqual(moved.artboard, withSecond.artboard)
+})
+
+test('moveObject reports unknown IDs and rejects invalid coordinates', () => {
+  const original = addRectangle(createSceneDocument(800, 600), { x: 10, y: 20, width: 80, height: 40 })
+  const before = structuredClone(original)
+
+  assert.throws(() => moveObject(original, 'missing-object', { x: 0, y: 0 }), DocumentValidationError)
+  assert.throws(() => moveObject(original, original.objects[0].id, { x: Number.NaN, y: 0 }), DocumentValidationError)
+  assert.throws(() => moveObject(original, original.objects[0].id, { x: 0, y: Number.POSITIVE_INFINITY }), DocumentValidationError)
+  assert.deepEqual(original, before)
+})
+
+test('moveObject returns the original document for a no-op', () => {
+  const original = addRectangle(createSceneDocument(800, 600), { x: 10, y: 20, width: 80, height: 40 })
+  const rectangle = original.objects[0]
+
+  assert.equal(moveObject(original, rectangle.id, { x: rectangle.x, y: rectangle.y }), original)
 })

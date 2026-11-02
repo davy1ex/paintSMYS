@@ -7,7 +7,7 @@ import { saveProjectAsFolder, saveExistingProjectFolder, readProjectFolder } fro
 import { mergeSavedProjectSession, saveProjectSession } from '../src/application/save-project-session'
 import type { ProjectSavePort, ProjectSaveRequest } from '../src/application/project-save-port'
 import { createUntitledProjectSession, openProjectSession, updateProjectSessionDocument, type ProjectSession } from '../src/application/project-session'
-import { addRectangle, removeObject } from '../src/core/document/scene-document'
+import { addRectangle, moveObject, removeObject } from '../src/core/document/scene-document'
 import { parseProjectManifest } from '../src/core/project/project-manifest'
 
 async function withTempDirectory(run: (directory: string) => Promise<void>) {
@@ -84,6 +84,25 @@ test('New Project draws one Rectangle, becomes dirty, then Save and Open restore
       (({ x, y, width, height, fill, stroke, strokeWidth }) => ({ x, y, width, height, fill, stroke, strokeWidth }))(opened.document.objects[0]),
       { x: 10, y: 20, width: 80, height: 40, fill: '#ffffff', stroke: '#000000', strokeWidth: 1 },
     )
+  })
+})
+
+test('Save and Open restore a moved Rectangle position', async () => {
+  await withTempDirectory(async (directory) => {
+    const target = join(directory, 'Moved rectangle')
+    const session = createUntitledProjectSession(800, 600)
+    const withRectangle = addRectangle(session.document, { x: 10, y: 20, width: 80, height: 40 })
+    const rectangle = withRectangle.objects[0]
+    const moved = moveObject(withRectangle, rectangle.id, { x: 140, y: -35 })
+    const result = await saveProjectSession(updateProjectSessionDocument(session, moved), diskSavePort(target))
+
+    assert.equal(result.status, 'saved')
+    if (result.status !== 'saved') return
+    const reopened = openProjectSession((await readProjectFolder(target)).manifestText, target)
+    assert.equal(reopened.isDirty, false)
+    assert.deepEqual(reopened.document.objects, moved.objects)
+    assert.equal(reopened.document.objects[0].x, 140)
+    assert.equal(reopened.document.objects[0].y, -35)
   })
 })
 
