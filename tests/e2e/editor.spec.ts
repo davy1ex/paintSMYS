@@ -249,7 +249,7 @@ test('draw, pan, select and move at 200% without changing scene geometry during 
   await page.keyboard.press('Control+y')
   await expect.poll(geometry).toEqual(moved)
 
-  const fillColor = page.getByRole('textbox', { name: 'Fill Color' })
+  const fillColor = page.getByRole('textbox', { name: 'Fill Color', exact: true })
   await fillColor.fill('#ff0000')
   await fillColor.press('Enter')
   const exportPromise = page.waitForEvent('download')
@@ -356,6 +356,51 @@ test('Paint palette colors new and selected objects, supports Undo/Redo, and exp
   await page.keyboard.press('Control+y')
   await expect(rectangle).toHaveAttribute('fill', '#ffff00')
 
+  const fillPicker = page.locator('[data-inspector-color-picker="fill"]')
+  await page.evaluate(() => {
+    const picker = document.querySelector<HTMLInputElement>('[data-inspector-color-picker="fill"]')
+    if (!picker) throw new Error('The Inspector Fill color picker is missing.')
+    picker.addEventListener('click', (event) => {
+      event.preventDefault()
+      picker.dataset.pickerInvoked = 'true'
+    }, { once: true })
+  })
+  await fillPicker.click()
+  await expect(fillPicker).toHaveAttribute('data-picker-invoked', 'true')
+  await fillPicker.evaluate((element) => {
+    const input = element as HTMLInputElement
+    const setValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set
+    setValue?.call(input, '#fedcba')
+    input.dispatchEvent(new Event('input', { bubbles: true }))
+    input.dispatchEvent(new Event('change', { bubbles: true }))
+  })
+  await expect(rectangle).toHaveAttribute('fill', '#fedcba')
+  await page.keyboard.press('Control+z')
+  await expect(rectangle).toHaveAttribute('fill', '#ffff00')
+  await page.keyboard.press('Control+y')
+  await expect(rectangle).toHaveAttribute('fill', '#fedcba')
+
+  const strokePicker = page.locator('[data-inspector-color-picker="stroke"]')
+  await page.evaluate(() => {
+    const picker = document.querySelector<HTMLInputElement>('[data-inspector-color-picker="stroke"]')
+    if (!picker) throw new Error('The Inspector Stroke color picker is missing.')
+    picker.addEventListener('click', (event) => event.preventDefault(), { once: true })
+  })
+  await page.getByRole('button', { name: 'Choose Stroke Color' }).press('Enter')
+  await strokePicker.evaluate((element) => {
+    const input = element as HTMLInputElement
+    const setValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set
+    setValue?.call(input, '#123456')
+    input.dispatchEvent(new Event('input', { bubbles: true }))
+    input.dispatchEvent(new Event('change', { bubbles: true }))
+  })
+  await expect(page.getByRole('button', { name: 'Choose Stroke Color' })).toBeFocused()
+  await expect(rectangle).toHaveAttribute('stroke', '#123456')
+  await page.keyboard.press('Control+z')
+  await expect(rectangle).toHaveAttribute('stroke', '#0000ff')
+  await page.keyboard.press('Control+y')
+  await expect(rectangle).toHaveAttribute('stroke', '#123456')
+
   await page.getByRole('button', { name: 'Choose custom color' }).click()
   const colorDialog = page.getByRole('dialog', { name: 'Custom Color' })
   await expect(colorDialog).toBeVisible()
@@ -364,11 +409,11 @@ test('Paint palette colors new and selected objects, supports Undo/Redo, and exp
   await colorDialog.getByRole('button', { name: 'OK' }).click()
   await expect(rectangle).toHaveAttribute('fill', '#123abc')
   await page.keyboard.press('Control+z')
-  await expect(rectangle).toHaveAttribute('fill', '#ffff00')
+  await expect(rectangle).toHaveAttribute('fill', '#fedcba')
   await page.keyboard.press('Control+y')
   await expect(rectangle).toHaveAttribute('fill', '#123abc')
 
-  const fillColor = page.getByRole('textbox', { name: 'Fill Color' })
+  const fillColor = page.getByRole('textbox', { name: 'Fill Color', exact: true })
   await fillColor.fill('#ff00ff')
   await fillColor.press('Enter')
   await expect(rectangle).toHaveAttribute('fill', '#ff00ff')
@@ -552,7 +597,7 @@ test('Export PNG downloads raster bytes with the Artboard size and expected pixe
   if (!rectangleBox) throw new Error('The drawn Rectangle is not visible.')
   await page.getByRole('button', { name: 'Select / Move' }).click()
   await page.mouse.click(rectangleBox.x + rectangleBox.width / 2, rectangleBox.y + rectangleBox.height / 2)
-  const fillColor = page.getByRole('textbox', { name: 'Fill Color' })
+  const fillColor = page.getByRole('textbox', { name: 'Fill Color', exact: true })
   await fillColor.fill('#ff0000')
   await fillColor.press('Enter')
   await expect(rectangle).toHaveAttribute('fill', '#ff0000')

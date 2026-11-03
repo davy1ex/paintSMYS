@@ -100,7 +100,11 @@ body.editor-workspace--moving, body.editor-workspace--moving * { cursor: move !i
 .inspector-input { box-sizing: border-box; width: 100%; min-width: 0; height: 22px; padding: 2px 4px; border: 1px solid; border-color: #404040 #fff #fff #404040; border-radius: 0; outline: none; background: #fff; color: #111; font: inherit; font-variant-numeric: tabular-nums; }
 .inspector-input:focus { outline: 1px dotted #000080; outline-offset: -3px; }
 .inspector-input[aria-invalid="true"] { border-color: #800000; }
-.inspector-color-swatch { box-sizing: border-box; width: 16px; height: 16px; flex: 0 0 16px; border: 1px solid #555; }
+.inspector-color-swatch { position: relative; box-sizing: border-box; width: 16px; height: 16px; flex: 0 0 16px; border: 1px solid; border-color: #fff #404040 #404040 #fff; border-radius: 0; box-shadow: 1px 1px 0 #555; cursor: pointer; }
+.inspector-color-swatch:hover { outline: 1px dotted #000080; outline-offset: 1px; }
+.inspector-color-swatch:focus-within { outline: 1px dotted #000080; outline-offset: 1px; }
+.inspector-color-swatch__button { position: absolute; inset: 0; width: 100%; height: 100%; padding: 0; border: 0; background: transparent; cursor: pointer; }
+.inspector-color-picker { position: absolute; z-index: 1; inset: 0; box-sizing: border-box; width: 100%; height: 100%; margin: 0; padding: 0; border: 0; opacity: 0; cursor: pointer; }
 .inspector-field__error { grid-column: 2; color: #800000; font-size: 10px; line-height: 1.2; }
 .inspector-object { padding-bottom: 12px; }
 .inspector-runs { margin-top: 7px; }

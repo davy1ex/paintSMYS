@@ -38,6 +38,15 @@ function numericValue(raw: string): { value: number } | { error: string } {
   return Number.isFinite(value) ? { value } : { error: 'Enter a finite number.' }
 }
 
+function colorPickerValue(color: string): string {
+  if (color.toLowerCase() === 'transparent') return '#ffffff'
+  const match = /^#([\da-f]{3,4}|[\da-f]{6}|[\da-f]{8})$/i.exec(color)
+  if (!match) return '#000000'
+  const value = match[1]
+  if (value.length <= 4) return `#${value.slice(0, 3).split('').map((digit) => digit + digit).join('')}`
+  return `#${value.slice(0, 6)}`
+}
+
 function InspectorField<T>({
   label,
   value,
@@ -50,6 +59,8 @@ function InspectorField<T>({
   registerCommitter,
 }: InspectorFieldProps<T>) {
   const inputRef = useRef<HTMLInputElement>(null)
+  const colorSwatchRef = useRef<HTMLButtonElement>(null)
+  const colorPickerRef = useRef<HTMLInputElement>(null)
   const draftRef = useRef(format(value))
   const dirtyRef = useRef(false)
   const commitRef = useRef<() => boolean>(() => true)
@@ -102,13 +113,59 @@ function InspectorField<T>({
     setError(null)
   }
 
+  const inputId = `inspector-field-${fieldKey}`
+  const pickerProperty = fieldKey.slice(fieldKey.lastIndexOf(':') + 1)
+
   return (
-    <label className="inspector-field">
-      <span className="inspector-field__label">{label}</span>
+    <div className="inspector-field">
+      <label className="inspector-field__label" htmlFor={inputId}>{label}</label>
       <div className="inspector-field__control">
-        {swatch !== undefined && <span className="inspector-color-swatch" style={{ backgroundColor: swatch }} aria-hidden="true" />}
+        {swatch !== undefined && (
+          <span
+            className="inspector-color-swatch"
+            title={`Choose ${label.toLowerCase()}`}
+            style={{ backgroundColor: swatch }}
+          >
+            <button
+              ref={colorSwatchRef}
+              className="inspector-color-swatch__button"
+              type="button"
+              aria-label={`Choose ${label}`}
+              onClick={() => {
+                if (commitRef.current()) colorPickerRef.current?.click()
+              }}
+            />
+            <input
+              ref={colorPickerRef}
+              className="inspector-color-picker"
+              type="color"
+              value={colorPickerValue(swatch)}
+              aria-hidden="true"
+              tabIndex={-1}
+              data-inspector-color-picker={pickerProperty}
+              onClick={(event) => {
+                if (!commitRef.current()) event.preventDefault()
+              }}
+              onChange={(event) => {
+                const pickedColor = event.currentTarget.value as T
+                const message = onCommit(pickedColor)
+                if (message) {
+                  setError(message)
+                  return
+                }
+                const formatted = format(pickedColor)
+                dirtyRef.current = false
+                draftRef.current = formatted
+                setDraft(formatted)
+                setError(null)
+                colorSwatchRef.current?.focus()
+              }}
+            />
+          </span>
+        )}
         <input
           ref={inputRef}
+          id={inputId}
           className="inspector-input"
           type="text"
           inputMode={inputMode}
@@ -137,7 +194,7 @@ function InspectorField<T>({
         />
       </div>
       {error && <span className="inspector-field__error" role="alert">{error}</span>}
-    </label>
+    </div>
   )
 }
 
