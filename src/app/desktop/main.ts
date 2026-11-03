@@ -20,6 +20,9 @@ const trustedRendererUrls = new WeakMap<WebContents, string>()
 const desktopE2eLaunchConfig = getDesktopE2eLaunchConfig(app.isPackaged, process.argv)
 if (desktopE2eLaunchConfig) app.setPath('userData', desktopE2eLaunchConfig.userDataPath)
 const desktopE2eProjectPath = desktopE2eLaunchConfig?.projectPath ?? null
+const desktopE2ePngExportPath = desktopE2eLaunchConfig
+  ? join(desktopE2eLaunchConfig.dialogDirectory, 'hello-world-export.png')
+  : null
 
 function showProjectOpenDialog(owner: BrowserWindow) {
   if (desktopE2eProjectPath) return Promise.resolve({ canceled: false, filePaths: [desktopE2eProjectPath] })
@@ -275,6 +278,7 @@ ipcMain.handle('paintSMYS:export-png', async (event, request: unknown) => {
   return exportPngFile(
     payload,
     async (defaultName) => {
+      if (desktopE2ePngExportPath) return desktopE2ePngExportPath
       pngExportDialogs.add(owner)
       try {
         const selection = await dialog.showSaveDialog(owner, {

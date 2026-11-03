@@ -1,0 +1,13 @@
+{
+  "id": "com.paintsmys.example.hello-world",
+  "name": "Hello World",
+  "version": "1.0.0",
+  "apiVersion": 0,
+  "entry": "index.js",
+  "commands": [
+    {
+      "id": "create-hello-world",
+      "name": "Hello World"
+    }
+  ]
+}

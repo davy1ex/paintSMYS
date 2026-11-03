@@ -1,17 +1,20 @@
 import { _electron as electron, expect, test as base, type ElectronApplication, type Locator, type Page } from '@playwright/test'
-import { copyFile, mkdir, mkdtemp, readFile, rm } from 'node:fs/promises'
+import { copyFile, cp, mkdir, mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
+import { inflateSync } from 'node:zlib'
 import type { ChildProcess } from 'node:child_process'
 
-type DesktopOptions = { installCodeCard: boolean; installWin95Window?: boolean }
+type DesktopOptions = { installCodeCard: boolean; installWin95Window?: boolean; installHelloWorld?: boolean }
 type DesktopHarness = {
   app: ElectronApplication
   page: Page
   userDataDir: string
   dialogDir: string
+  pngExportPath: string
   close: () => Promise<void>
   processExitReason: () => string | null
+  rendererErrors: () => string[]
 }
 type DesktopFixtures = { desktop: DesktopHarness; desktopOptions: DesktopOptions }
 
@@ -35,6 +38,7 @@ const test = base.extend<DesktopFixtures>({
     const tempRoot = await mkdtemp(join(tmpdir(), 'paintsmys-desktop-e2e-'))
     const userDataDir = join(tempRoot, 'user-data')
     const dialogDir = join(tempRoot, 'dialogs')
+    const pngExportPath = join(dialogDir, 'hello-world-export.png')
     await mkdir(userDataDir, { recursive: true })
     await mkdir(dialogDir, { recursive: true })
 
@@ -50,8 +54,12 @@ const test = base.extend<DesktopFixtures>({
       await copyFile(resolve('examples/plugins/win95-window/manifest.json'), join(installedPluginDir, 'manifest.json'))
       await copyFile(resolve('examples/plugins/win95-window/index.js'), join(installedPluginDir, 'index.js'))
     }
+    if (desktopOptions.installHelloWorld) {
+      await cp(resolve('examples/plugins/hello-world'), join(userDataDir, 'plugins', 'hello-world'), { recursive: true })
+    }
 
     const diagnosticLines: string[] = []
+    const rendererErrors: string[] = []
     let diagnosticBytes = 0
     const appendDiagnostic = (message: string) => {
       const line = `${message}\n`
@@ -135,9 +143,15 @@ const test = base.extend<DesktopFixtures>({
 
       page = await app.firstWindow()
       page.on('console', (message) => {
-        if (message.type() === 'error') appendDiagnostic(`Renderer console.error: ${message.text()}`)
+        if (message.type() === 'error') {
+          rendererErrors.push(message.text())
+          appendDiagnostic(`Renderer console.error: ${message.text()}`)
+        }
       })
-      page.on('pageerror', (error) => appendDiagnostic(`Renderer pageerror: ${error.stack ?? error.message}`))
+      page.on('pageerror', (error) => {
+        rendererErrors.push(error.stack ?? error.message)
+        appendDiagnostic(`Renderer pageerror: ${error.stack ?? error.message}`)
+      })
       try {
         await app.context().tracing.start({ screenshots: true, snapshots: true, sources: true })
         tracingStarted = true
@@ -150,8 +164,10 @@ const test = base.extend<DesktopFixtures>({
         page,
         userDataDir,
         dialogDir,
+        pngExportPath,
         close,
         processExitReason: () => processExit,
+        rendererErrors: () => [...rendererErrors],
       }
       await use(harness)
     } catch (error) {
@@ -252,6 +268,142 @@ async function fillCodeCard(page: Page, sourceCode: string) {
   await page.getByLabel('Source code').fill(sourceCode)
   await page.getByRole('button', { name: 'Generate', exact: true }).click()
 }
+
+function decodePngRgba(pngBytes: Buffer): { width: number; height: number; pixelAt: (x: number, y: number) => number[] } {
+  const signature = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])
+  expect(pngBytes.subarray(0, 8)).toEqual(signature)
+  let width = 0
+  let height = 0
+  let bitDepth = 0
+  let colorType = 0
+  const compressedData: Buffer[] = []
+  let offset = 8
+  while (offset + 12 <= pngBytes.length) {
+    const length = pngBytes.readUInt32BE(offset)
+    const type = pngBytes.toString('ascii', offset + 4, offset + 8)
+    const chunk = pngBytes.subarray(offset + 8, offset + 8 + length)
+    if (type === 'IHDR') {
+      width = chunk.readUInt32BE(0)
+      height = chunk.readUInt32BE(4)
+      bitDepth = chunk[8] ?? 0
+      colorType = chunk[9] ?? 0
+    } else if (type === 'IDAT') compressedData.push(chunk)
+    offset += length + 12
+    if (type === 'IEND') break
+  }
+
+  expect(bitDepth).toBe(8)
+  expect(colorType).toBe(6)
+  const bytesPerPixel = 4
+  const rowLength = width * bytesPerPixel
+  const filtered = inflateSync(Buffer.concat(compressedData))
+  const rows: Buffer[] = []
+  let inputOffset = 0
+  for (let y = 0; y < height; y += 1) {
+    const filter = filtered[inputOffset] ?? 0
+    inputOffset += 1
+    const row = Buffer.from(filtered.subarray(inputOffset, inputOffset + rowLength))
+    inputOffset += rowLength
+    const previous = rows[y - 1]
+    for (let x = 0; x < rowLength; x += 1) {
+      const left = x >= bytesPerPixel ? row[x - bytesPerPixel] ?? 0 : 0
+      const above = previous?.[x] ?? 0
+      const upperLeft = x >= bytesPerPixel ? previous?.[x - bytesPerPixel] ?? 0 : 0
+      let predictor = 0
+      if (filter === 1) predictor = left
+      else if (filter === 2) predictor = above
+      else if (filter === 3) predictor = Math.floor((left + above) / 2)
+      else if (filter === 4) {
+        const estimate = left + above - upperLeft
+        const leftDistance = Math.abs(estimate - left)
+        const aboveDistance = Math.abs(estimate - above)
+        const upperLeftDistance = Math.abs(estimate - upperLeft)
+        predictor = leftDistance <= aboveDistance && leftDistance <= upperLeftDistance
+          ? left
+          : aboveDistance <= upperLeftDistance ? above : upperLeft
+      } else expect(filter).toBe(0)
+      row[x] = ((row[x] ?? 0) + predictor) & 0xff
+    }
+    rows.push(row)
+  }
+
+  return {
+    width,
+    height,
+    pixelAt(x, y) {
+      if (!Number.isInteger(x) || !Number.isInteger(y) || x < 0 || y < 0 || x >= width || y >= height) {
+        throw new Error('The requested PNG pixel is outside the image.')
+      }
+      const row = rows[y]
+      if (!row) throw new Error('The exported PNG pixel row is missing.')
+      const pixelOffset = x * bytesPerPixel
+      return [...row.subarray(pixelOffset, pixelOffset + bytesPerPixel)]
+    },
+  }
+}
+
+test.describe('real installed Hello World plugin', () => {
+  test.use({ desktopOptions: { installCodeCard: false, installHelloWorld: true } })
+
+  test('loads the command, creates selectable objects in one undo step, redoes them, and exports PNG', async ({ desktop }) => {
+    const page = desktop.page
+    const svg = await createArtboard(page, 1280, 720)
+    const pluginRuntime = page.locator('iframe[title="Hello World plugin runtime"]')
+    await expect(pluginRuntime).toHaveAttribute('sandbox', 'allow-scripts')
+    await page.getByRole('button', { name: 'Plugins' }).click()
+    const command = page.getByRole('menuitem', { name: 'Hello World', exact: true })
+    await expect(command).toBeVisible()
+    await command.click()
+
+    const rectangle = svg.locator(':scope > rect').nth(1)
+    const text = svg.locator('text[aria-label="Hello from paintSMYS!"]')
+    await expect(rectangle).toHaveAttribute('fill', '#2f6fed')
+    await expect(text).toBeVisible()
+    await expect(page.getByText('2 objects', { exact: true })).toBeVisible()
+
+    await page.getByRole('button', { name: 'Select / Move' }).click()
+    const rectangleBounds = await rectangle.boundingBox()
+    if (!rectangleBounds) throw new Error('The Hello World Rectangle is not visible on the Artboard.')
+    await page.mouse.click(rectangleBounds.x + rectangleBounds.width / 4, rectangleBounds.y + rectangleBounds.height / 4)
+    await expect(page.getByText('Rectangle Properties', { exact: true })).toBeVisible()
+
+    const textBounds = await text.boundingBox()
+    if (!textBounds) throw new Error('The Hello World Text is not visible on the Artboard.')
+    await page.mouse.click(textBounds.x + textBounds.width / 2, textBounds.y + textBounds.height / 2)
+    await expect(page.getByText('Text Properties', { exact: true })).toBeVisible()
+
+    await page.getByRole('button', { name: 'Edit' }).click()
+    await page.getByRole('menuitem', { name: /Undo/ }).click()
+    await expect(svg.locator(':scope > rect')).toHaveCount(1)
+    await expect(svg.locator(':scope > text')).toHaveCount(0)
+    await expect(page.getByText('0 objects', { exact: true })).toBeVisible()
+
+    await page.getByRole('button', { name: 'Edit' }).click()
+    await page.getByRole('menuitem', { name: /Redo/ }).click()
+    await expect(svg.locator(':scope > rect')).toHaveCount(2)
+    await expect(text).toBeVisible()
+
+    await page.getByRole('button', { name: 'File' }).click()
+    await page.getByRole('menuitem', { name: 'Export PNG…' }).click()
+    await expect(page.getByRole('status')).toContainText('PNG exported.')
+    const pngBytes = await readFile(desktop.pngExportPath)
+    const rectangleX = Number(await rectangle.getAttribute('x'))
+    const rectangleY = Number(await rectangle.getAttribute('y'))
+    const png = decodePngRgba(pngBytes)
+    expect({ width: png.width, height: png.height }).toEqual({ width: 1280, height: 720 })
+    expect(png.pixelAt(rectangleX + 10, rectangleY + 10)).toEqual([47, 111, 237, 255])
+    const textX = Number(await text.locator('tspan').first().getAttribute('x'))
+    const textY = Number(await text.locator('tspan').first().getAttribute('y'))
+    const textPixelFound = Array.from({ length: 38 }, (_, row) => row)
+      .some((row) => Array.from({ length: 360 }, (_, column) => column)
+        .some((column) => {
+          const sample = png.pixelAt(textX + column, textY - 30 + row)
+          return sample[0] === 255 && sample[1] === 255 && sample[2] === 255
+        }))
+    expect(textPixelFound).toBe(true)
+    expect(desktop.rendererErrors()).toEqual([])
+  })
+})
 
 test('starts the real Electron app, creates a project, draws a Rectangle, and exits', async ({ desktop }) => {
   const pageUrl = new URL(desktop.page.url())

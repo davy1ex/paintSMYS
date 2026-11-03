@@ -47,17 +47,17 @@ npm run dev:desktop
 
 Плагин — обычная папка с `manifest.json` и `index.js`. Он добавляет одну или несколько команд в меню **Plugins** и может создать на Artboard редактируемые объекты. Плагины работают в Desktop-версии; Web-версия их не загружает.
 
+### Hello World
+
+Команда **Hello World** добавляет один цветной Rectangle и Text с надписью `Hello from paintSMYS!`. Это минимальный самодостаточный пример: для запуска готового плагина не нужны Node.js, npm или сборка. Начни с [`examples/plugins/hello-world`](examples/plugins/hello-world) и его [инструкции](examples/plugins/hello-world/README.md).
+
 ### Win95 Window
 
-Команда **Generate Win95 Window** открывает форму для заголовка окна и приветствия, затем собирает окно в стиле Windows 95 из обычных Rectangle и Text. Элементы можно выбирать и менять по отдельности.
-
-Плагин не требует сборки и готов к установке из каталога [`examples/plugins/win95-window`](examples/plugins/win95-window). Подробности — в его [README](examples/plugins/win95-window/README.md).
+Команда **Generate Win95 Window** открывает форму для заголовка и приветствия, затем собирает ретроокно Windows 95 из редактируемых Rectangle и Text. Папка [`examples/plugins/win95-window`](examples/plugins/win95-window) готова к копированию; смотри её [README](examples/plugins/win95-window/README.md).
 
 ### Code Card
 
-Команда **Generate Code Card** показывает форму для заголовка, языка и исходного кода. Плагин строит окно редактора кода и подсвечивает Python, JavaScript или TypeScript с помощью Shiki. Код остаётся текстовым объектом со стилями, а рамка и элементы окна — отдельными редактируемыми прямоугольниками.
-
-Готовый самодостаточный `index.js` уже находится в [`examples/plugins/code-card`](examples/plugins/code-card); устанавливать зависимости для запуска плагина не нужно. Его можно пересобрать командой `npm run build:plugin:code-card`. Подробности и сторонние уведомления — в [README](examples/plugins/code-card/README.md) и [THIRD_PARTY_NOTICES.md](examples/plugins/code-card/THIRD_PARTY_NOTICES.md).
+Команда **Generate Code Card** превращает Python, JavaScript или TypeScript в карточку с подсветкой синтаксиса. Готовая папка [`examples/plugins/code-card`](examples/plugins/code-card) включает самодостаточный `index.js`; инструкция и уведомления Shiki находятся в [README](examples/plugins/code-card/README.md) и [THIRD_PARTY_NOTICES.md](examples/plugins/code-card/THIRD_PARTY_NOTICES.md).
 
 ## Как установить плагин
 
@@ -70,56 +70,22 @@ npm run dev:desktop
    | Linux | `~/.config/paint-smys/plugins/` |
    | macOS | `~/Library/Application Support/paint-smys/plugins/` |
 
-   Например, после копирования Code Card файл должен лежать по пути `.../plugins/code-card/manifest.json`, рядом с `index.js`. Если приложение собрано с другой конфигурацией имени, точный базовый путь задаёт `app.getPath('userData')`.
+   Например, после копирования Hello World файлы должны лежать по пути `.../plugins/hello-world/manifest.json` и `.../plugins/hello-world/index.js`. Если приложение собрано с другой конфигурацией имени, точный базовый путь задаёт `app.getPath('userData')`.
 
-3. Запусти paintSMYS, открой или создай проект и выбери **Plugins → Generate Win95 Window** или **Plugins → Generate Code Card**.
+3. Запусти paintSMYS, открой или создай проект и выбери команду плагина в меню **Plugins**.
 
 После добавления, изменения или удаления плагина перезапусти приложение. Автоматической установки и горячей перезагрузки нет.
 
-## Как написать свой плагин
+## Свой плагин за 5 минут
 
-Создай папку `hello-world` с двумя файлами. Это короткий пример API v0: команда добавляет обычный текстовый объект, без изменений в исходниках paintSMYS.
+1. Скачай или скопируй [`examples/plugins/hello-world`](examples/plugins/hello-world).
+2. Переименуй папку. В `manifest.json` измени `id` на уникальный, например `com.example.my-plugin`, а также обнови `name`, если нужно.
+3. Измени `index.js`: `message` задаёт надпись, `fill` — цвет Rectangle, а `x` и `y` рассчитываются по размеру Artboard. Вызов `host.addObjects([...])` добавляет прямоугольник и текст одной операцией. Примеры и пояснения по этим строкам есть в [README Hello World](examples/plugins/hello-world/README.md).
+4. Закрой paintSMYS и скопируй папку в пользовательский каталог `plugins` из таблицы выше.
+5. Перезапусти paintSMYS.
+6. Открой проект, выбери **Plugins → Hello World** и проверь результат на Artboard.
 
-Для такого расположения текста выбери Artboard не меньше 480 × 160 px.
-
-`manifest.json`:
-
-```json
-{
-  "id": "com.example.hello-world",
-  "name": "Hello World",
-  "version": "1.0.0",
-  "apiVersion": 0,
-  "entry": "index.js",
-  "commands": [
-    { "id": "create-hello-world", "name": "Create Hello World" }
-  ]
-}
-```
-
-`index.js`:
-
-```js
-globalThis.paintSMYSPlugin = {
-  activate(api) {
-    api.registerCommand('create-hello-world', async (host) => {
-      await host.addObjects([
-        {
-          type: 'text',
-          x: 80,
-          y: 100,
-          text: 'Hello from a plugin!',
-          fontFamily: 'Arial',
-          fontSize: 32,
-          color: '#000080',
-        },
-      ])
-    })
-  },
-}
-```
-
-Скопируй папку `hello-world` в каталог `plugins` по инструкции выше, перезапусти Desktop-приложение и открой **Plugins → Create Hello World**. Контракт, ограничения объектов и формы описаны в [`docs/PLUGIN_API_V0.md`](docs/PLUGIN_API_V0.md).
+Плагин использует только действующий Plugin API v0 и не импортирует исходники редактора. API и формат объектов описаны в [`docs/PLUGIN_API_V0.md`](docs/PLUGIN_API_V0.md). Устанавливай сторонние плагины только из источников, которым доверяешь.
 
 ## Разработка, сборка и тесты
 
