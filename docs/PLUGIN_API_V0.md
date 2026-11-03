@@ -11,7 +11,7 @@ Plugin API v0 supports local Desktop action plugins. A plugin contributes one or
    <app.getPath('userData')>/plugins/win95-window/
    ```
 
-   The current packaged app normally uses `%APPDATA%/paintSMYS/plugins` on Windows, `~/.config/paintSMYS/plugins` on Linux, and `~/Library/Application Support/paintSMYS/plugins` on macOS. Electron derives this location from the application name; use `app.getPath('userData')` if a package or development build uses a different name.
+   With the current `package.json` name, the app normally uses `%APPDATA%/paint-smys/plugins` on Windows, `~/.config/paint-smys/plugins` on Linux, and `~/Library/Application Support/paint-smys/plugins` on macOS. Electron derives this location from the application name in `package.json`; use `app.getPath('userData')` if a build changes that name.
 
 3. Start paintSMYS and open a project. The **Plugins** menu lists commands whose manifest and entry point loaded successfully.
 
