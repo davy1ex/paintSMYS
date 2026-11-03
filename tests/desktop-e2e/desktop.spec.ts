@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import type { ChildProcess } from 'node:child_process'
 
-type DesktopOptions = { installCodeCard: boolean }
+type DesktopOptions = { installCodeCard: boolean; installWin95Window?: boolean }
 type DesktopHarness = {
   app: ElectronApplication
   page: Page
@@ -43,6 +43,12 @@ const test = base.extend<DesktopFixtures>({
       await mkdir(installedPluginDir, { recursive: true })
       await copyFile(resolve('examples/plugins/code-card/manifest.json'), join(installedPluginDir, 'manifest.json'))
       await copyFile(resolve('examples/plugins/code-card/index.js'), join(installedPluginDir, 'index.js'))
+    }
+    if (desktopOptions.installWin95Window) {
+      const installedPluginDir = join(userDataDir, 'plugins', 'win95-window')
+      await mkdir(installedPluginDir, { recursive: true })
+      await copyFile(resolve('examples/plugins/win95-window/manifest.json'), join(installedPluginDir, 'manifest.json'))
+      await copyFile(resolve('examples/plugins/win95-window/index.js'), join(installedPluginDir, 'index.js'))
     }
 
     const diagnosticLines: string[] = []
@@ -230,6 +236,16 @@ async function openCodeCardCommand(page: Page) {
   return dialog
 }
 
+async function openWin95WindowCommand(page: Page) {
+  await page.getByRole('button', { name: 'Plugins' }).click()
+  const command = page.getByRole('menuitem', { name: 'Generate Win95 Window', exact: true })
+  await expect(command).toBeVisible()
+  await command.click()
+  const dialog = page.getByRole('dialog', { name: 'Generate Win95 Window' })
+  await expect(dialog).toBeVisible()
+  return dialog
+}
+
 async function fillCodeCard(page: Page, sourceCode: string) {
   await page.getByLabel('Window title').fill('paintSMYS E2E')
   await page.getByLabel('Language').selectOption('python')
@@ -336,5 +352,76 @@ test.describe('real installed Code Card plugin', () => {
     await expect.poll(async () => (await svg.locator('text').allTextContents()).join('\n')).toContain('return "invocation works"')
     await expect.poll(async () => await svg.locator(':scope > rect').count()).toBeGreaterThan(2)
     await expect(svg.locator(':scope > text')).not.toHaveCount(0)
+  })
+})
+
+test.describe('real installed Win95 Window plugin', () => {
+  test.use({ desktopOptions: { installCodeCard: false, installWin95Window: true } })
+
+  test('renders one window with an internal status bar and no external menu', async ({ desktop }, testInfo) => {
+    const svg = await createArtboard(desktop.page, 1000, 640)
+    await openWin95WindowCommand(desktop.page)
+    await desktop.page.getByLabel('Window title').fill('Visual E2E Program Manager - Desktop Layout')
+    await desktop.page.getByLabel('Welcome message').fill('Welcome to the live SVG window layout check')
+    await desktop.page.getByRole('button', { name: 'Generate', exact: true }).click()
+
+    await expect(svg.locator('text[aria-label="Visual E2E Program Manager - Desktop Layout"]')).toBeVisible()
+    await expect(svg.locator('text[aria-label="Welcome to the live SVG window layout check"]')).toBeVisible()
+    await expect(svg.locator('text[aria-label="3 items"]')).toBeVisible()
+    await expect(svg.locator('text[aria-label="Start"]')).toHaveCount(0)
+    await expect(svg.locator('text[aria-label^="Programs"]')).toHaveCount(0)
+
+    const geometry = await svg.evaluate((element) => {
+      const rects = [...element.querySelectorAll(':scope > rect')].map((rect) => ({
+        x: Number(rect.getAttribute('x') ?? 0),
+        y: Number(rect.getAttribute('y') ?? 0),
+        width: Number(rect.getAttribute('width') ?? 0),
+        height: Number(rect.getAttribute('height') ?? 0),
+        fill: rect.getAttribute('fill'),
+        stroke: rect.getAttribute('stroke'),
+        strokeWidth: Number(rect.getAttribute('stroke-width') ?? 0),
+      }))
+      const texts = [...element.querySelectorAll(':scope > text')].map((text) => {
+        const bounds = (text as SVGGraphicsElement).getBBox()
+        return {
+          label: text.getAttribute('aria-label'),
+          x: bounds.x,
+          y: bounds.y,
+          width: bounds.width,
+          height: bounds.height,
+        }
+      })
+      const viewBox = (element as SVGSVGElement).viewBox.baseVal
+      return { width: viewBox.width, height: viewBox.height, rects, texts }
+    })
+    const windowFrame = geometry.rects.find(({ fill, stroke, strokeWidth }) => fill === '#c0c0c0' && stroke === '#000000' && strokeWidth === 2)
+    const clientArea = geometry.rects.find(({ fill, stroke }) => fill === '#ffffff' && stroke === '#808080')
+    const statusBar = geometry.rects.find(({ fill, stroke, height }) => fill === '#c0c0c0' && stroke === '#ffffff' && height === 18)
+    const statusText = geometry.texts.find(({ label }) => label === '3 items')
+    const welcomeText = geometry.texts.find(({ label }) => label === 'Welcome to the live SVG window layout check')
+    expect(windowFrame).toBeDefined()
+    expect(clientArea).toBeDefined()
+    expect(statusBar).toBeDefined()
+    expect(statusText).toBeDefined()
+    expect(welcomeText).toBeDefined()
+    if (!windowFrame || !clientArea || !statusBar || !statusText || !welcomeText) return
+
+    expect(windowFrame.x).toBeGreaterThanOrEqual(0)
+    expect(windowFrame.y).toBeGreaterThanOrEqual(0)
+    expect(windowFrame.x + windowFrame.width).toBeLessThanOrEqual(geometry.width)
+    expect(windowFrame.y + windowFrame.height).toBeLessThanOrEqual(geometry.height)
+    expect(geometry.rects.some(({ fill, width }) => fill === '#c0c0c0' && width > geometry.width - 40)).toBe(false)
+    expect(statusBar.y).toBeGreaterThanOrEqual(clientArea.y + clientArea.height)
+    expect(statusBar.y + statusBar.height).toBeLessThanOrEqual(windowFrame.y + windowFrame.height)
+    expect(windowFrame.y + windowFrame.height - statusBar.y - statusBar.height).toBeGreaterThanOrEqual(8)
+    expect(windowFrame.y + windowFrame.height - statusBar.y - statusBar.height).toBeLessThanOrEqual(12)
+    expect(statusText.x).toBeGreaterThanOrEqual(statusBar.x)
+    expect(statusText.x + statusText.width).toBeLessThanOrEqual(statusBar.x + statusBar.width)
+    expect(welcomeText.x).toBeGreaterThanOrEqual(clientArea.x)
+    expect(welcomeText.x + welcomeText.width).toBeLessThanOrEqual(clientArea.x + clientArea.width)
+
+    const screenshotPath = testInfo.outputPath('win95-window-live-render.png')
+    await desktop.page.screenshot({ path: screenshotPath, fullPage: true })
+    await testInfo.attach('win95-window-live-render', { path: screenshotPath, contentType: 'image/png' })
   })
 })
