@@ -23,5 +23,5 @@
     "src/editor/workspace/scene-svg-serialization.tsx",
     "tests/**/*.ts"
   ],
-  "exclude": ["tests/e2e/**"]
+  "exclude": ["tests/e2e/**", "tests/desktop-e2e/**"]
 }

@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import type { PngExportRequest } from '../../application/export-png-port'
 import { loadInstalledPlugins } from './plugin-loader'
+import { getDesktopE2eLaunchConfig } from './desktop-e2e-launch-config'
 import { inspectSaveAsTarget, readProjectFolder, saveExistingProjectFolder, saveProjectAsFolder } from './project-storage'
 import { exportPngFile } from './png-export'
 import { CloseHandshake } from './window/close-handshake'
@@ -13,6 +14,30 @@ const closeHandshakes = new WeakMap<BrowserWindow, CloseHandshake>()
 const pngExportDialogs = new WeakSet<BrowserWindow>()
 const closeAfterPngExportDialog = new WeakSet<BrowserWindow>()
 const trustedRendererUrls = new WeakMap<WebContents, string>()
+
+// Overrides are accepted only for the unpackaged Playwright fixture's explicit
+// temporary profile layout. Installed applications always use native dialogs.
+const desktopE2eLaunchConfig = getDesktopE2eLaunchConfig(app.isPackaged, process.argv)
+if (desktopE2eLaunchConfig) app.setPath('userData', desktopE2eLaunchConfig.userDataPath)
+const desktopE2eProjectPath = desktopE2eLaunchConfig?.projectPath ?? null
+
+function showProjectOpenDialog(owner: BrowserWindow) {
+  if (desktopE2eProjectPath) return Promise.resolve({ canceled: false, filePaths: [desktopE2eProjectPath] })
+  return dialog.showOpenDialog(owner, {
+    title: 'Open paintSMYS Project',
+    properties: ['openDirectory'],
+  })
+}
+
+function showProjectSaveDialog(owner: BrowserWindow, projectName: string) {
+  if (desktopE2eProjectPath) return Promise.resolve({ canceled: false, filePath: desktopE2eProjectPath })
+  return dialog.showSaveDialog(owner, {
+    title: 'Save paintSMYS Project As',
+    buttonLabel: 'Create Project',
+    nameFieldLabel: 'Project folder name:',
+    defaultPath: join(app.getPath('documents'), projectName.replace(/[<>:"/\\|?*\u0000-\u001f]/g, '-').replace(/[. ]+$/g, '').trim() || 'Untitled'),
+  })
+}
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : 'The project operation failed.'
@@ -167,10 +192,7 @@ ipcMain.handle('paintSMYS:open-project', async (event) => {
   const owner = BrowserWindow.fromWebContents(event.sender)
   if (!owner) return { status: 'error', message: 'The application window is unavailable.' }
 
-  const result = await dialog.showOpenDialog(owner, {
-    title: 'Open paintSMYS Project',
-    properties: ['openDirectory'],
-  })
+  const result = await showProjectOpenDialog(owner)
   if (result.canceled || result.filePaths.length === 0) return { status: 'cancelled' }
 
   try {
@@ -198,12 +220,7 @@ ipcMain.handle('paintSMYS:save-project', async (event, request: unknown) => {
 
   try {
     if (payload.mode === 'save-as') {
-      const selection = await dialog.showSaveDialog(owner, {
-        title: 'Save paintSMYS Project As',
-        buttonLabel: 'Create Project',
-        nameFieldLabel: 'Project folder name:',
-        defaultPath: join(app.getPath('documents'), payload.projectName.replace(/[<>:"/\\|?*\u0000-\u001f]/g, '-').replace(/[. ]+$/g, '').trim() || 'Untitled'),
-      })
+      const selection = await showProjectSaveDialog(owner, payload.projectName)
       if (selection.canceled || !selection.filePath) return { status: 'cancelled' }
 
       const target = await inspectSaveAsTarget(selection.filePath)
