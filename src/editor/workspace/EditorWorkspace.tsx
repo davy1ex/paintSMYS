@@ -1,4 +1,4 @@
-import { forwardRef, useEffect, useImperativeHandle, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from 'react'
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from 'react'
 import { addRectangle, addTextObject, DEFAULT_TEXT_FONT_SIZE, MAX_TEXT_LENGTH, moveObject, removeObject, updateRectangleObjectProperties, updateTextObject, updateTextObjectProperties, type RectangleGeometry, type RectangleObjectProperties, type SceneDocument, type SceneObject, type TextObjectProperties } from '../../core/document/scene-document'
 import type { ProjectSession } from '../../application/project-session'
 import type { ProjectSaveMode } from '../../application/project-save-port'
@@ -8,6 +8,7 @@ import EditorMenuBar from './EditorMenuBar'
 import PropertyInspector, { type PropertyInspectorHandle } from './PropertyInspector'
 import { SceneSvgContent } from './SceneSvgContent'
 import ToolPanel from './ToolPanel'
+import { controlZoomScale, fitScaleForViewport, panForZoomAnchor, panFromPointerDrag, wheelZoomScale } from './viewport-math'
 import './editor-workspace.css'
 
 type ActiveTool = 'select' | 'rectangle' | 'text'
@@ -73,6 +74,17 @@ type ObjectMoveGesture = GestureBase & {
 
 type EditorGesture = RectangleDrawGesture | ObjectMoveGesture
 
+type CameraState =
+  | { mode: 'fit' }
+  | { mode: 'manual'; scale: number; pan: Point }
+
+type PanGesture = {
+  pointerId: number
+  startClient: Point
+  startPan: Point
+  startScale: number
+}
+
 const RECTANGLE_HIT_SLOP_CSS_PIXELS = 8
 
 function pointerToArtboard(svg: SVGSVGElement, point: Point): Point | null {
@@ -113,6 +125,10 @@ function isEditableTarget(target: EventTarget | null): boolean {
   return target.isContentEditable || target.closest('input, textarea, select') !== null
 }
 
+function isBlockedCameraTarget(target: EventTarget | null): boolean {
+  return isEditableTarget(target) || globalThis.document.querySelector('dialog[open]') !== null
+}
+
 const EditorWorkspace = forwardRef<EditorWorkspaceHandle, EditorWorkspaceProps>(function EditorWorkspace({
   session,
   canSave,
@@ -137,12 +153,18 @@ const EditorWorkspace = forwardRef<EditorWorkspaceHandle, EditorWorkspaceProps>(
   const canvasRef = useRef<HTMLDivElement>(null)
   const svgRef = useRef<SVGSVGElement>(null)
   const gestureRef = useRef<EditorGesture | null>(null)
+  const panGestureRef = useRef<PanGesture | null>(null)
+  const spaceDownRef = useRef(false)
+  const suppressNextClickRef = useRef(false)
   const textDraftRef = useRef<TextDraft | null>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const inspectorRef = useRef<PropertyInspectorHandle>(null)
   const documentRef = useRef(session.document)
   const pointerClientRef = useRef<Point | null>(null)
   const [viewportSize, setViewportSize] = useState({ width: 0, height: 0 })
+  const [camera, setCamera] = useState<CameraState>({ mode: 'fit' })
+  const [isSpaceDown, setIsSpaceDown] = useState(false)
+  const [isPanning, setIsPanning] = useState(false)
   const [mockActionMessage, setMockActionMessage] = useState('')
   const [activeTool, setActiveTool] = useState<ActiveTool>('select')
   const [preview, setPreview] = useState<NormalizedRectangle | null>(null)
@@ -151,17 +173,26 @@ const EditorWorkspace = forwardRef<EditorWorkspaceHandle, EditorWorkspaceProps>(
   const [isMovingObject, setIsMovingObject] = useState(false)
   const [selectedObjectId, setSelectedObjectId] = useState<string | null>(null)
   const [textDraft, setTextDraft] = useState<TextDraft | null>(null)
+  const projectIdRef = useRef(session.projectId)
   const { document } = session
   documentRef.current = document
   const { artboard } = document
-  const fitScale = Math.min(
-    viewportSize.width / artboard.width || 0,
-    viewportSize.height / artboard.height || 0,
-  )
-  const scale = Math.min(1, fitScale)
+  const fitScale = fitScaleForViewport(viewportSize, artboard)
+  const scale = camera.mode === 'fit' ? fitScale : camera.scale
+  const pan = camera.mode === 'fit' ? { x: 0, y: 0 } : camera.pan
   const boardWidth = Math.max(0, artboard.width * scale)
   const boardHeight = Math.max(0, artboard.height * scale)
   const zoomLabel = scale > 0 ? `${Math.round(scale * 100)}%` : 'Fit'
+  const clearPanGesture = useCallback((pointerId?: number, releaseCapture = false) => {
+    const gesture = panGestureRef.current
+    if (!gesture || (pointerId !== undefined && gesture.pointerId !== pointerId)) return
+    panGestureRef.current = null
+    setIsPanning(false)
+    if (releaseCapture) {
+      const canvas = canvasRef.current
+      if (canvas?.hasPointerCapture(gesture.pointerId)) canvas.releasePointerCapture(gesture.pointerId)
+    }
+  }, [])
   const selectedObject = document.objects.find((object) => object.id === selectedObjectId) ?? null
   const selectedBounds = selectedObject ? getSceneObjectBounds(selectedObject) : null
   const visibleSelectedBounds = selectedObject && selectedBounds
@@ -240,6 +271,94 @@ const EditorWorkspace = forwardRef<EditorWorkspaceHandle, EditorWorkspaceProps>(
     observer.observe(element)
     return () => observer.disconnect()
   }, [])
+
+  useEffect(() => {
+    if (projectIdRef.current === session.projectId) return
+    projectIdRef.current = session.projectId
+    setCamera({ mode: 'fit' })
+    clearPanGesture(undefined, true)
+    spaceDownRef.current = false
+    setIsSpaceDown(false)
+  }, [clearPanGesture, session.projectId])
+
+  useEffect(() => {
+    const canvas = canvasRef.current
+    if (!canvas) return
+    const handleWheel = (event: WheelEvent) => {
+      if (
+        !event.ctrlKey || isClosePromptOpen || globalThis.document.querySelector('dialog[open]') || scale <= 0
+      ) return
+      event.preventDefault()
+      const bounds = canvas.getBoundingClientRect()
+      const center = { x: bounds.left + bounds.width / 2, y: bounds.top + bounds.height / 2 }
+      const nextScale = wheelZoomScale(scale, event.deltaY, event.deltaMode, bounds.height)
+      const nextPan = panForZoomAnchor(
+        scale,
+        nextScale,
+        pan,
+        { x: event.clientX, y: event.clientY },
+        center,
+        artboard,
+      )
+      setCamera({ mode: 'manual', scale: nextScale, pan: nextPan })
+    }
+    canvas.addEventListener('wheel', handleWheel, { passive: false })
+    return () => canvas.removeEventListener('wheel', handleWheel)
+  }, [artboard, camera, isClosePromptOpen, pan, scale])
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.code === 'Space') {
+        if (event.repeat || isClosePromptOpen || isBlockedCameraTarget(event.target)) return
+        event.preventDefault()
+        spaceDownRef.current = true
+        setIsSpaceDown(true)
+        return
+      }
+
+      if (
+        !spaceDownRef.current || isClosePromptOpen || isBlockedCameraTarget(event.target) ||
+        event.altKey || event.ctrlKey || event.metaKey || scale <= 0
+      ) return
+      const step = event.shiftKey ? 128 : 32
+      const delta = event.code === 'ArrowLeft' ? { x: -step, y: 0 }
+        : event.code === 'ArrowRight' ? { x: step, y: 0 }
+          : event.code === 'ArrowUp' ? { x: 0, y: -step }
+            : event.code === 'ArrowDown' ? { x: 0, y: step }
+              : null
+      if (!delta) return
+      event.preventDefault()
+      setCamera((currentCamera) => {
+        const currentPan = currentCamera.mode === 'fit' ? { x: 0, y: 0 } : currentCamera.pan
+        const currentScale = currentCamera.mode === 'fit' ? fitScale : currentCamera.scale
+        return {
+          mode: 'manual',
+          scale: currentScale,
+          pan: { x: currentPan.x + delta.x, y: currentPan.y + delta.y },
+        }
+      })
+    }
+    const handleKeyUp = (event: KeyboardEvent) => {
+      if (event.code !== 'Space') return
+      event.preventDefault()
+      spaceDownRef.current = false
+      setIsSpaceDown(false)
+      clearPanGesture(undefined, true)
+    }
+    const handleBlur = () => {
+      spaceDownRef.current = false
+      setIsSpaceDown(false)
+      clearPanGesture(undefined, true)
+    }
+    globalThis.document.addEventListener('keydown', handleKeyDown)
+    globalThis.document.addEventListener('keyup', handleKeyUp)
+    globalThis.window.addEventListener('blur', handleBlur)
+    return () => {
+      globalThis.document.removeEventListener('keydown', handleKeyDown)
+      globalThis.document.removeEventListener('keyup', handleKeyUp)
+      globalThis.window.removeEventListener('blur', handleBlur)
+    }
+  }, [clearPanGesture, fitScale, isClosePromptOpen, scale])
 
   useEffect(() => {
     if (textDraft) textareaRef.current?.focus()
@@ -385,6 +504,17 @@ const EditorWorkspace = forwardRef<EditorWorkspaceHandle, EditorWorkspaceProps>(
     const handlePointerMove = (event: PointerEvent) => {
       const clientPoint = { x: event.clientX, y: event.clientY }
       pointerClientRef.current = clientPoint
+      const panGesture = panGestureRef.current
+      if (panGesture?.pointerId === event.pointerId) {
+        const nextPan = panFromPointerDrag(panGesture.startPan, panGesture.startClient, clientPoint)
+        if (nextPan.x === panGesture.startPan.x && nextPan.y === panGesture.startPan.y) return
+        setCamera({
+          mode: 'manual',
+          scale: panGesture.startScale,
+          pan: nextPan,
+        })
+        return
+      }
       if (gestureRef.current) updatePreview(event.clientX, event.clientY, event.pointerId)
       else if (event.pointerType !== 'touch') updateHover(clientPoint)
     }
@@ -397,6 +527,12 @@ const EditorWorkspace = forwardRef<EditorWorkspaceHandle, EditorWorkspaceProps>(
     }
 
     const handlePointerUp = (event: PointerEvent) => {
+      if (panGestureRef.current?.pointerId === event.pointerId) {
+        clearPanGesture(event.pointerId, true)
+        globalThis.window.setTimeout(() => { suppressNextClickRef.current = false }, 0)
+        return
+      }
+      if (suppressNextClickRef.current) globalThis.window.setTimeout(() => { suppressNextClickRef.current = false }, 0)
       finishGesture(event.clientX, event.clientY, event.pointerId)
     }
 
@@ -406,6 +542,11 @@ const EditorWorkspace = forwardRef<EditorWorkspaceHandle, EditorWorkspaceProps>(
     }
 
     const handlePointerCancel = (event: PointerEvent) => {
+      if (panGestureRef.current?.pointerId === event.pointerId) {
+        clearPanGesture(event.pointerId, true)
+        suppressNextClickRef.current = false
+        return
+      }
       const gesture = gestureRef.current
       if (gesture?.pointerId !== event.pointerId) return
       gestureRef.current = null
@@ -430,11 +571,18 @@ const EditorWorkspace = forwardRef<EditorWorkspaceHandle, EditorWorkspaceProps>(
       globalThis.window.removeEventListener('mousemove', handleMouseMove, true)
       globalThis.window.removeEventListener('mouseup', handleMouseUp, true)
     }
-  }, [activeTool, document, onDocumentChange])
+  }, [activeTool, document, onDocumentChange, clearPanGesture])
 
   useEffect(() => {
     const cancelGesture = (event: KeyboardEvent) => {
       if (event.key !== 'Escape' || globalThis.document.querySelector('dialog[open]')) return
+      if (panGestureRef.current) {
+        event.preventDefault()
+        clearPanGesture(undefined, true)
+        spaceDownRef.current = false
+        setIsSpaceDown(false)
+        return
+      }
       const gesture = gestureRef.current
       if (!gesture) return
       event.preventDefault()
@@ -451,7 +599,7 @@ const EditorWorkspace = forwardRef<EditorWorkspaceHandle, EditorWorkspaceProps>(
     }
     globalThis.document.addEventListener('keydown', cancelGesture)
     return () => globalThis.document.removeEventListener('keydown', cancelGesture)
-  }, [activeTool, document])
+  }, [activeTool, clearPanGesture, document])
 
   useEffect(() => {
     if (!isMovingObject) return
@@ -553,6 +701,11 @@ const EditorWorkspace = forwardRef<EditorWorkspaceHandle, EditorWorkspaceProps>(
   }
 
   function handleCanvasClick(event: ReactMouseEvent<SVGSVGElement>) {
+    if (suppressNextClickRef.current) {
+      suppressNextClickRef.current = false
+      event.preventDefault()
+      return
+    }
     if (activeTool !== 'text' || textDraftRef.current) return
     const position = pointerToArtboard(event.currentTarget, { x: event.clientX, y: event.clientY })
     if (!position) return
@@ -562,7 +715,29 @@ const EditorWorkspace = forwardRef<EditorWorkspaceHandle, EditorWorkspaceProps>(
     setActiveTextDraft({ mode: 'create', ...position, text: '' })
   }
 
+  function handleWorkspacePointerDown(event: ReactPointerEvent<HTMLDivElement>) {
+    if (
+      !spaceDownRef.current || event.button !== 0 || !event.isPrimary ||
+      panGestureRef.current || gestureRef.current || isClosePromptOpen || isBlockedCameraTarget(event.target)
+    ) return
+    if (scale <= 0) return
+    const startClient = { x: event.clientX, y: event.clientY }
+    panGestureRef.current = { pointerId: event.pointerId, startClient, startPan: pan, startScale: scale }
+    setIsPanning(true)
+    suppressNextClickRef.current = true
+    event.preventDefault()
+    event.currentTarget.setPointerCapture(event.pointerId)
+  }
+
+  function handleWorkspaceLostPointerCapture(event: ReactPointerEvent<HTMLDivElement>) {
+    if (panGestureRef.current?.pointerId === event.pointerId) {
+      clearPanGesture(event.pointerId)
+      suppressNextClickRef.current = false
+    }
+  }
+
   function handlePointerDown(event: ReactPointerEvent<SVGSVGElement>) {
+    if (spaceDownRef.current || panGestureRef.current || isBlockedCameraTarget(event.target)) return
     if (event.button !== 0 || !event.isPrimary || gestureRef.current) return
     const startClient = { x: event.clientX, y: event.clientY }
     pointerClientRef.current = startClient
@@ -659,11 +834,20 @@ const EditorWorkspace = forwardRef<EditorWorkspaceHandle, EditorWorkspaceProps>(
       <div className="editor-main">
         <ToolPanel activeTool={activeTool} onToolChange={setActiveTool} />
         <section className="editor-stage" aria-label="Artboard workspace">
-          <div className="editor-canvas-wrap" ref={canvasRef}>
+          <div
+            className={`editor-canvas-wrap${isSpaceDown ? ' editor-canvas-wrap--space' : ''}${isPanning ? ' editor-canvas-wrap--panning' : ''}`}
+            ref={canvasRef}
+            onPointerDown={handleWorkspacePointerDown}
+            onLostPointerCapture={handleWorkspaceLostPointerCapture}
+          >
             <div
               className={`editor-artboard${activeTool === 'rectangle' ? ' editor-artboard--drawing' : ''}${activeTool === 'text' ? ' editor-artboard--texting' : ''}${activeTool === 'select' && hoveredObjectId ? ' editor-artboard--move-target' : ''}${isMovingObject ? ' editor-artboard--moving' : ''}`}
               aria-label={`Artboard ${artboard.width} by ${artboard.height} pixels`}
-              style={{ width: boardWidth, height: boardHeight }}
+              style={{
+                width: boardWidth,
+                height: boardHeight,
+                transform: `translate3d(-50%, -50%, 0) translate3d(${pan.x}px, ${pan.y}px, 0)`,
+              }}
             >
               <svg
                 ref={svgRef}
@@ -763,7 +947,16 @@ const EditorWorkspace = forwardRef<EditorWorkspaceHandle, EditorWorkspaceProps>(
               )}
             </div>
           </div>
-          <div className="editor-stage__footer"><span>{zoomLabel}</span><span>{document.objects.length} objects</span></div>
+          <div className="editor-stage__footer">
+            <div className="editor-zoom-controls" aria-label="Zoom controls">
+              <button className="editor-zoom-controls__button" type="button" aria-label="Zoom out" onClick={() => setCamera({ mode: 'manual', scale: controlZoomScale(scale, -1), pan })}>−</button>
+              <span className="editor-zoom-controls__level" aria-label="Zoom level">{zoomLabel}</span>
+              <button className="editor-zoom-controls__button" type="button" aria-label="Zoom in" onClick={() => setCamera({ mode: 'manual', scale: controlZoomScale(scale, 1), pan })}>+</button>
+              <button className="editor-zoom-controls__button editor-zoom-controls__one-to-one" type="button" aria-label="100%" onClick={() => setCamera({ mode: 'manual', scale: 1, pan: { x: 0, y: 0 } })}>100%</button>
+              <button className="editor-zoom-controls__button" type="button" aria-label="Fit" onClick={() => setCamera({ mode: 'fit' })}>Fit</button>
+            </div>
+            <span>{document.objects.length} objects</span>
+          </div>
         </section>
         <PropertyInspector
           ref={inspectorRef}

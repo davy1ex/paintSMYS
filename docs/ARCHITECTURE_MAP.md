@@ -1,6 +1,6 @@
 # paintSMYS — Architecture Map
 
-**Status:** checked against the repository at `467f671` (2026-11-03). This describes implemented code, not the target design in [ARCHITECTURE.md](ARCHITECTURE.md) or every requirement in [PRD.md](PRD.md). Source paths below are the evidence for the boxes and arrows.
+**Status:** checked against the repository after `449c207` (2026-11-03); the viewport notes include the current working-tree implementation. This describes implemented code, not the target design in [ARCHITECTURE.md](ARCHITECTURE.md) or every requirement in [PRD.md](PRD.md). Source paths below are the evidence for the boxes and arrows.
 
 ## C4 container view
 
@@ -81,7 +81,7 @@ flowchart TB
   history -->|dirty comparison against saved baseline| session
 ```
 
-Evidence: [App.tsx](../src/app/App.tsx) stores `session` and `sessionRef`, owns `historyRef`, wires adapters, save and plugin callbacks; [project-session.ts](../src/application/project-session.ts) defines immutable session updates; [document-history.ts](../src/application/document-history.ts) stores history snapshots and the saved baseline. [EditorWorkspace.tsx](../src/editor/workspace/EditorWorkspace.tsx) owns transient tool, selection, pointer gesture and text-draft state, calls Core operations for completed edits, and sends document changes to App. [ToolPanel.tsx](../src/editor/workspace/ToolPanel.tsx) selects a tool, [PropertyInspector.tsx](../src/editor/workspace/PropertyInspector.tsx) commits editable properties, and [SceneSvgContent.tsx](../src/editor/workspace/SceneSvgContent.tsx) renders the artboard and scene objects.
+Evidence: [App.tsx](../src/app/App.tsx) stores `session` and `sessionRef`, owns `historyRef`, wires adapters, save and plugin callbacks; [project-session.ts](../src/application/project-session.ts) defines immutable session updates; [document-history.ts](../src/application/document-history.ts) stores history snapshots and the saved baseline. [EditorWorkspace.tsx](../src/editor/workspace/EditorWorkspace.tsx) owns transient tool, selection, pointer gesture, text-draft and viewport camera state, calls Core operations for completed edits, and sends document changes to App. [ToolPanel.tsx](../src/editor/workspace/ToolPanel.tsx) selects a tool, [PropertyInspector.tsx](../src/editor/workspace/PropertyInspector.tsx) commits editable properties, and [SceneSvgContent.tsx](../src/editor/workspace/SceneSvgContent.tsx) renders the artboard and scene objects.
 
 Core is [scene-document.ts](../src/core/document/scene-document.ts) plus [project-manifest.ts](../src/core/project/project-manifest.ts). It validates scene values and returns new document snapshots. `ProjectSession.document` held by App is the current scene source of truth; history keeps prior snapshots and a saved-baseline reference, while EditorWorkspace keeps only transient UI state. Application save coordination is in [save-project-session.ts](../src/application/save-project-session.ts); the platform ports are in `src/application/*-port.ts`; adapters are [desktop](../src/app/desktop/project-adapter.ts) and [web](../src/app/web/project-adapter.ts).
 
@@ -90,6 +90,7 @@ Core is [scene-document.ts](../src/core/document/scene-document.ts) plus [projec
 - The source import graph is directional from app/UI and adapters toward Application/Core; no import cycle was found. Core has no React, Electron, DOM or filesystem imports.
 - Shared `App.tsx` directly reads `window.paintSMYS?.windowControls` for the Desktop close handshake, although the target architecture says common UI should not reach a Desktop global. This is a real platform coupling to keep visible; it is not refactored in this audit. The Web branch also installs `beforeunload` protection.
 - `EditorWorkspace` uses the DOM/SVG for pointer and keyboard input, but has no Electron import. Desktop filesystem access stays behind the adapter → preload → Main path.
+- `EditorWorkspace` keeps Fit/manual zoom and CSS-pixel pan offsets outside `ProjectSession` and `SceneDocument`. Fit uses the observed canvas-wrap dimensions; the SVG keeps the Artboard `viewBox`, while its parent Artboard's CSS dimensions and transform carry the scale and pan. Pointer conversion continues to use `getScreenCTM().inverse()`, so drawing, hit testing, selection and object movement share the same transform. The export serializer still renders only `SceneDocument` at Artboard dimensions.
 - `src/app/desktop/plugins/isolated-plugin-runtime.ts` is a renderer-side host despite its `desktop` path: it creates the sandboxed iframe and coordinates plugin messages; the app layer owns the transaction and session guard.
 - The PRD describes broader project, asset and web-viewer goals. In the checked implementation, Web Save Project and the separate Web Viewer are absent; PNG export is implemented in both platforms. Desktop plugin loading is local and is not available in the Web entrypoint.
 

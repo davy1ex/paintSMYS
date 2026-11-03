@@ -40,8 +40,8 @@
 .tool-panel__button:focus-visible { outline: 1px dotted #111; outline-offset: -4px; }
 .tool-panel__button svg { display: block; width: 18px; height: 18px; }
 .editor-stage { position: relative; display: flex; min-width: 0; flex: 1; flex-direction: column; padding: 16px 16px 22px; background: #808080; }
-.editor-canvas-wrap { display: grid; min-width: 0; min-height: 0; flex: 1; overflow: hidden; place-items: center; background-color: #a0a0a0; background-image: linear-gradient(45deg, #aaa 25%, transparent 25%), linear-gradient(-45deg, #aaa 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #aaa 75%), linear-gradient(-45deg, transparent 75%, #aaa 75%); background-position: 0 0, 0 5px, 5px -5px, -5px 0; background-size: 10px 10px; }
-.editor-artboard { position: relative; flex: none; overflow: hidden; background: #fff; cursor: default; box-shadow: 1px 1px 0 #333, 2px 2px 0 #ddd; }
+.editor-canvas-wrap { position: relative; display: grid; min-width: 0; min-height: 0; flex: 1; overflow: hidden; place-items: center; background-color: #a0a0a0; background-image: linear-gradient(45deg, #aaa 25%, transparent 25%), linear-gradient(-45deg, #aaa 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #aaa 75%), linear-gradient(-45deg, transparent 75%, #aaa 75%); background-position: 0 0, 0 5px, 5px -5px, -5px 0; background-size: 10px 10px; }
+.editor-artboard { position: absolute; top: 50%; left: 50%; overflow: hidden; background: #fff; cursor: default; box-shadow: 1px 1px 0 #333, 2px 2px 0 #ddd; }
 .editor-artboard--move-target, .editor-artboard--moving { cursor: move; }
 .editor-artboard--drawing { cursor: crosshair; }
 .editor-artboard--texting, .scene-svg--texting, .scene-svg--texting * { cursor: text; }
@@ -49,9 +49,18 @@ body.editor-workspace--moving, body.editor-workspace--moving * { cursor: move !i
 .scene-svg { display: block; width: 100%; height: 100%; cursor: default; touch-action: none; }
 .scene-svg--move-target, .scene-svg--move-target *, .scene-svg--moving, .scene-svg--moving * { cursor: move; }
 .scene-svg--drawing, .scene-svg--drawing * { cursor: crosshair; }
+.editor-canvas-wrap--space, .editor-canvas-wrap--space * { cursor: grab !important; }
+.editor-canvas-wrap--panning, .editor-canvas-wrap--panning * { cursor: grabbing !important; }
+.editor-canvas-wrap--panning .editor-artboard { will-change: transform; }
 .text-draft-input { position: absolute; z-index: 1; box-sizing: content-box; overflow: hidden; padding: 2px; border: 1px solid #000080; border-radius: 0; outline: 1px solid #fff; background: #fff; color: #000; line-height: 1.2; white-space: pre; resize: none; }
 .text-draft-input::placeholder { color: #555; opacity: 1; }
 .editor-stage__footer { position: absolute; right: 0; bottom: 0; left: 0; display: flex; height: 21px; align-items: center; justify-content: space-between; padding: 2px 7px; border-top: 1px solid #404040; color: #eee; font-size: 10px; }
+.editor-zoom-controls { display: flex; height: 18px; align-items: center; gap: 2px; }
+.editor-zoom-controls__button { min-width: 19px; height: 17px; padding: 0 4px; border: 1px solid; border-color: #fff #404040 #404040 #fff; background: #c0c0c0; color: #111; font: inherit; line-height: 14px; cursor: default; }
+.editor-zoom-controls__button:active { border-color: #404040 #fff #fff #404040; padding: 1px 3px 0 5px; }
+.editor-zoom-controls__button:focus-visible { outline: 1px dotted #000080; outline-offset: -3px; }
+.editor-zoom-controls__level { min-width: 37px; color: #eee; text-align: center; font-variant-numeric: tabular-nums; }
+.editor-zoom-controls__one-to-one { min-width: 34px; }
 .property-inspector { display: flex; width: 230px; flex: 0 0 230px; flex-direction: column; overflow: auto; border-left: 2px solid; border-color: #fff #404040 #404040 #fff; background: #c0c0c0; }
 .inspector-title { min-height: 29px; padding: 7px 9px; border-bottom: 1px solid #808080; font-weight: 700; }
 .inspector-section-label { margin: 15px 10px 5px; color: #555; font-size: 10px; font-weight: 700; letter-spacing: .04em; }

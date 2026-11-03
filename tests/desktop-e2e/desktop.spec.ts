@@ -353,6 +353,93 @@ test.describe('real installed Code Card plugin', () => {
     await expect.poll(async () => await svg.locator(':scope > rect').count()).toBeGreaterThan(2)
     await expect(svg.locator(':scope > text')).not.toHaveCount(0)
   })
+
+  test('modal forms ignore camera gestures, then return control to the editor', async ({ desktop }) => {
+    const svg = await createArtboard(desktop.page, 1000, 640)
+    const zoomLevel = desktop.page.getByLabel('Zoom level')
+    await expect(zoomLevel).toHaveText(/\d+%/)
+    const originalZoom = await zoomLevel.textContent()
+    const originalBounds = await svg.boundingBox()
+    const dialog = await openCodeCardCommand(desktop.page)
+    const dialogBounds = await dialog.boundingBox()
+    if (!dialogBounds || !originalBounds) throw new Error('The modal or Artboard has no visible bounds.')
+
+    await desktop.page.keyboard.down('Control')
+    await desktop.page.mouse.move(dialogBounds.x + dialogBounds.width / 2, dialogBounds.y + dialogBounds.height / 2)
+    await desktop.page.mouse.wheel(0, -600)
+    await desktop.page.keyboard.up('Control')
+    await expect(zoomLevel).toHaveText(originalZoom ?? '')
+
+    const title = desktop.page.getByLabel('Window title')
+    await title.fill('modal text')
+    await title.press('Space')
+    await expect(title).toHaveValue('modal text ')
+    await desktop.page.keyboard.down('Space')
+    await desktop.page.mouse.move(dialogBounds.x + dialogBounds.width / 2, dialogBounds.y + dialogBounds.height / 2)
+    await desktop.page.mouse.down()
+    await desktop.page.mouse.move(dialogBounds.x + dialogBounds.width / 2 + 45, dialogBounds.y + dialogBounds.height / 2 + 30, { steps: 3 })
+    await desktop.page.mouse.up()
+    await desktop.page.keyboard.up('Space')
+    await expect(zoomLevel).toHaveText(originalZoom ?? '')
+    const afterModalGestures = await svg.boundingBox()
+    expect(afterModalGestures?.x).toBeCloseTo(originalBounds.x, 0)
+    expect(afterModalGestures?.y).toBeCloseTo(originalBounds.y, 0)
+
+    await desktop.page.keyboard.press('Escape')
+    await expect(dialog).toBeHidden()
+    await drawRectangle(desktop.page, svg)
+    await expect(desktop.page.getByText('1 objects', { exact: true })).toBeVisible()
+  })
+
+  test('Code Card text stays readable and movable at 400% after panning', async ({ desktop }, testInfo) => {
+    const svg = await createArtboard(desktop.page, 1280, 720)
+    await openCodeCardCommand(desktop.page)
+    await fillCodeCard(desktop.page, 'def paint():\n    return "paintSMYS"')
+    const codeText = svg.locator('text[aria-label*="return "]')
+    await expect(codeText).toBeVisible()
+
+    await desktop.page.getByRole('button', { name: '100%' }).click()
+    const zoomIn = desktop.page.getByRole('button', { name: 'Zoom in' })
+    for (let step = 0; step < 12; step += 1) await zoomIn.click()
+    await expect(desktop.page.getByLabel('Zoom level')).toHaveText('400%')
+
+    const workspace = desktop.page.locator('.editor-canvas-wrap')
+    const workspaceBounds = await workspace.boundingBox()
+    if (!workspaceBounds) throw new Error('The Code Card workspace is not visible.')
+    const panStart = { x: workspaceBounds.x + workspaceBounds.width / 2, y: workspaceBounds.y + workspaceBounds.height / 2 }
+    for (let step = 0; step < 1; step += 1) {
+      await desktop.page.keyboard.down('Space')
+      await desktop.page.mouse.move(panStart.x, panStart.y)
+      await desktop.page.mouse.down()
+      await desktop.page.mouse.move(panStart.x + 80, panStart.y + 20, { steps: 3 })
+      await desktop.page.mouse.up()
+      await desktop.page.keyboard.up('Space')
+    }
+
+    const textBounds = await codeText.boundingBox()
+    if (!textBounds) throw new Error('The Code Card source text is not visible after zooming and panning.')
+    const screenshotPath = testInfo.outputPath('code-card-viewport-400.png')
+    await desktop.page.screenshot({ path: screenshotPath, fullPage: true })
+    await testInfo.attach('code-card-viewport-400', { path: screenshotPath, contentType: 'image/png' })
+
+    const firstLine = codeText.locator('tspan').first()
+    const originalX = Number(await firstLine.getAttribute('x'))
+    const originalY = Number(await firstLine.getAttribute('y'))
+    await desktop.page.getByRole('button', { name: 'Select / Move' }).click()
+    await desktop.page.mouse.move(textBounds.x + textBounds.width / 2, textBounds.y + textBounds.height / 2)
+    await desktop.page.mouse.down()
+    await desktop.page.mouse.move(textBounds.x + textBounds.width / 2 + 100, textBounds.y + textBounds.height / 2 + 40, { steps: 4 })
+    await desktop.page.mouse.up()
+    await expect.poll(async () => Number(await firstLine.getAttribute('x'))).toBeCloseTo(originalX + 25, 0)
+    await expect.poll(async () => Number(await firstLine.getAttribute('y'))).toBeCloseTo(originalY + 10, 0)
+
+    await desktop.page.getByRole('button', { name: 'Fit' }).click()
+    const boardBounds = await svg.boundingBox()
+    const fitBounds = await workspace.boundingBox()
+    if (!boardBounds || !fitBounds) throw new Error('The Code Card did not return to Fit.')
+    expect(boardBounds.width).toBeLessThanOrEqual(fitBounds.width)
+    expect(boardBounds.height).toBeLessThanOrEqual(fitBounds.height)
+  })
 })
 
 test.describe('real installed Win95 Window plugin', () => {

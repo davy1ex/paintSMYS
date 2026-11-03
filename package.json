@@ -11,7 +11,7 @@
     "dev:desktop": "electron-vite dev --config electron.vite.config.ts",
     "dev:web": "vite --config vite.config.ts",
     "typecheck": "tsc --noEmit",
-    "test": "tsc -p tsconfig.test.json && node .test-dist/tests/desktop-e2e-launch-config.test.js && node .test-dist/tests/project-save.test.js && node .test-dist/tests/project-close.test.js && node .test-dist/tests/rectangle-document.test.js && node .test-dist/tests/rectangle-geometry.test.js && node .test-dist/tests/document-history.test.js && node .test-dist/tests/plugin-api.test.js && node .test-dist/tests/plugin-runtime.test.js && node .test-dist/tests/plugin-example.test.js && node .test-dist/tests/code-card-plugin.test.js && node .test-dist/tests/text-object.test.js && node .test-dist/tests/png-export.test.js",
+    "test": "tsc -p tsconfig.test.json && node .test-dist/tests/desktop-e2e-launch-config.test.js && node .test-dist/tests/project-save.test.js && node .test-dist/tests/project-close.test.js && node .test-dist/tests/rectangle-document.test.js && node .test-dist/tests/rectangle-geometry.test.js && node .test-dist/tests/viewport-math.test.js && node .test-dist/tests/document-history.test.js && node .test-dist/tests/plugin-api.test.js && node .test-dist/tests/plugin-runtime.test.js && node .test-dist/tests/plugin-example.test.js && node .test-dist/tests/code-card-plugin.test.js && node .test-dist/tests/text-object.test.js && node .test-dist/tests/png-export.test.js",
     "test:e2e": "playwright test",
     "test:e2e:headed": "playwright test --headed",
     "test:e2e:desktop": "electron-vite build --config electron.vite.config.ts && node examples/plugins/code-card/scripts/build.mjs && node scripts/run-desktop-e2e.mjs",
