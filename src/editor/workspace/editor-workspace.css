@@ -32,6 +32,35 @@
 .editor-toolbar-spacer { flex: 1; }
 .editor-dimensions { padding: 5px 8px; border: 1px solid; border-color: #808080 #fff #fff #808080; background: #bdbdbd; font-variant-numeric: tabular-nums; }
 .editor-main { display: flex; min-height: 0; flex: 1; }
+.editor-color-palette { display: flex; min-height: 53px; flex: 0 0 53px; align-items: center; gap: 8px; padding: 4px 8px; border-top: 2px solid; border-color: #fff #404040 #404040 #fff; background: #c0c0c0; user-select: none; }
+.editor-color-palette__current { position: relative; width: 46px; height: 40px; flex: 0 0 46px; }
+.editor-color-palette__current-label { position: absolute; top: 0; left: 0; color: #444; font-size: 8px; font-weight: 700; letter-spacing: .04em; }
+.editor-color-palette__foreground-color, .editor-color-palette__background-color { position: absolute; width: 24px; height: 24px; border: 1px solid; border-color: #fff #404040 #404040 #fff; box-shadow: 1px 1px 0 #000; }
+.editor-color-palette__background-color { right: 0; bottom: 0; }
+.editor-color-palette__foreground-color { top: 9px; left: 0; z-index: 1; }
+.editor-color-palette__swatches { display: grid; width: min(278px, 100%); min-width: 0; flex: 0 1 278px; grid-template-columns: repeat(14, minmax(12px, 1fr)); gap: 2px; }
+.editor-color-palette__swatch { display: block; width: 100%; min-width: 0; aspect-ratio: 1; padding: 0; border: 1px solid #404040; border-radius: 0; box-shadow: inset 1px 1px 0 #fff; cursor: default; }
+.editor-color-palette__swatch:hover { filter: brightness(1.12); }
+.editor-color-palette__swatch--foreground { outline: 1px dotted #000080; outline-offset: -3px; }
+.editor-color-palette__swatch--background { box-shadow: inset 0 0 0 2px #fff, inset 0 0 0 3px #000; }
+.editor-color-palette__swatch:focus-visible, .editor-color-palette__custom:focus-visible { outline: 1px dotted #000080; outline-offset: 1px; }
+.editor-color-palette__custom { display: flex; width: 56px; height: 39px; flex: 0 0 56px; flex-direction: column; align-items: center; justify-content: center; gap: 2px; padding: 2px; border: 1px solid; border-color: #fff #404040 #404040 #fff; background: #c0c0c0; color: #111; font-size: 9px; cursor: default; }
+.editor-color-palette__custom:active { border-color: #404040 #fff #fff #404040; }
+.editor-color-palette__custom-swatch { display: block; width: 22px; height: 19px; border: 1px solid #404040; box-shadow: inset 1px 1px 0 #fff; }
+.editor-color-palette__custom-swatch--rainbow { background: linear-gradient(135deg, #f00 0 16%, #ff0 16% 32%, #0f0 32% 48%, #0ff 48% 64%, #00f 64% 80%, #f0f 80%); }
+.editor-color-dialog { position: fixed; top: 50%; left: 50%; width: min(330px, calc(100vw - 24px)); margin: 0; padding: 0; transform: translate(-50%, -50%); border: 2px solid; border-color: #fff #404040 #404040 #fff; border-radius: 0; background: #c0c0c0; color: #111; box-shadow: 2px 2px 0 #000; font: inherit; }
+.editor-color-dialog::backdrop { background: rgb(0 0 0 / 28%); }
+.editor-color-dialog__titlebar { padding: 5px 7px; background: #000080; color: #fff; font-weight: 700; }
+.editor-color-dialog__body { display: grid; gap: 10px; padding: 12px; }
+.editor-color-dialog__picker-label, .editor-color-dialog__hex-label { display: flex; min-height: 28px; align-items: center; justify-content: space-between; gap: 10px; }
+.editor-color-dialog input[type="color"] { width: 52px; height: 28px; padding: 2px; border: 2px solid; border-color: #404040 #fff #fff #404040; border-radius: 0; background: #c0c0c0; }
+.editor-color-dialog input[type="text"] { width: 120px; height: 24px; padding: 2px 5px; border: 2px solid; border-color: #404040 #fff #fff #404040; border-radius: 0; background: #fff; color: #111; font: 12px Consolas, monospace; }
+.editor-color-dialog__target { display: grid; gap: 5px; margin: 0; padding: 7px 9px 9px; border: 1px solid #808080; }
+.editor-color-dialog__target legend { padding: 0 4px; }
+.editor-color-dialog__target label { display: flex; align-items: center; gap: 6px; }
+.editor-color-dialog__error { color: #800000; font-size: 11px; }
+.editor-color-dialog__actions { display: flex; justify-content: flex-end; gap: 8px; }
+.editor-color-dialog__actions button { min-width: 74px; min-height: 26px; }
 .tool-panel { width: 72px; flex: 0 0 72px; padding: 7px 6px; border-right: 2px solid; border-color: #fff #404040 #404040 #fff; background: #c0c0c0; }
 .tool-panel__grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 4px; }
 .tool-panel__button { display: grid; width: 27px; aspect-ratio: 1; padding: 3px; border: 1px solid; border-color: #fff #404040 #404040 #fff; background: #c0c0c0; color: #111; place-items: center; cursor: default; }
@@ -92,6 +121,10 @@ body.editor-workspace--moving, body.editor-workspace--moving * { cursor: move !i
   .inspector-list dd { max-width: 95px; }
 }
 @media (max-width: 480px) {
+  .editor-color-palette { gap: 4px; padding-right: 4px; padding-left: 4px; }
+  .editor-color-palette__current { width: 41px; flex-basis: 41px; }
+  .editor-color-palette__swatches { width: auto; flex: 1 1 0; grid-template-columns: repeat(14, minmax(10px, 1fr)); gap: 1px; }
+  .editor-color-palette__custom { width: 49px; flex-basis: 49px; }
   .property-inspector { width: 145px; flex-basis: 145px; }
   .editor-stage { padding-right: 8px; }
   .editor-dimensions { font-size: 10px; }

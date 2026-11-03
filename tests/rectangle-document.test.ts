@@ -26,6 +26,21 @@ test('addRectangle returns a valid immutable scene and preserves object order', 
   })
 })
 
+test('addRectangle accepts palette appearance while keeping legacy defaults', () => {
+  const scene = createSceneDocument(320, 240)
+  const colored = addRectangle(scene, { x: 5, y: 6, width: 40, height: 30 }, {
+    fill: '#00ff00',
+    stroke: '#0000ff',
+  })
+  const rectangle = colored.objects[0]
+  assert.equal(rectangle?.type, 'rectangle')
+  if (rectangle?.type !== 'rectangle') throw new Error('Expected a rectangle.')
+  assert.equal(rectangle.fill, '#00ff00')
+  assert.equal(rectangle.stroke, '#0000ff')
+  assert.equal(rectangle.strokeWidth, 1)
+  assert.throws(() => addRectangle(scene, { x: 5, y: 6, width: 40, height: 30 }, { fill: 'not-a-color' }), DocumentValidationError)
+})
+
 test('addRectangle rejects invalid geometry through the scene validator', () => {
   const scene = createSceneDocument(800, 600)
   for (const geometry of [

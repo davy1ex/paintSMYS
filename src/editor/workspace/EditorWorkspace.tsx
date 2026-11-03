@@ -1,10 +1,11 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from 'react'
-import { addRectangle, addTextObject, DEFAULT_TEXT_FONT_SIZE, MAX_TEXT_LENGTH, moveObject, removeObject, updateRectangleObjectProperties, updateTextObject, updateTextObjectProperties, type RectangleGeometry, type RectangleObjectProperties, type SceneDocument, type SceneObject, type TextObjectProperties } from '../../core/document/scene-document'
+import { addRectangle, addTextObject, DEFAULT_TEXT_COLOR, DEFAULT_TEXT_FONT_SIZE, MAX_TEXT_LENGTH, moveObject, removeObject, setTextRuns, updateRectangleObjectProperties, updateTextObject, updateTextObjectProperties, type RectangleAppearance, type RectangleGeometry, type RectangleObjectProperties, type SceneDocument, type SceneObject, type TextObjectProperties } from '../../core/document/scene-document'
 import type { ProjectSession } from '../../application/project-session'
 import type { ProjectSaveMode } from '../../application/project-save-port'
 import type { PluginMenuCommand } from '../../application/plugins/plugin-api'
 import { findTopmostObjectAtPoint, getSceneObjectBounds, isGestureLongEnough, normalizeRectangle, transformPoint, transformVector, translateRectangle, type NormalizedRectangle, type Point } from './rectangle-geometry'
 import EditorMenuBar from './EditorMenuBar'
+import ColorPalette, { type PaintColorChannel } from './ColorPalette'
 import PropertyInspector, { type PropertyInspectorHandle } from './PropertyInspector'
 import { SceneSvgContent } from './SceneSvgContent'
 import ToolPanel from './ToolPanel'
@@ -46,6 +47,7 @@ type TextDraft = {
   text: string
   fontFamily?: string
   fontSize?: number
+  color: string
   objectId?: string
   originalText?: string
 }
@@ -167,6 +169,7 @@ const EditorWorkspace = forwardRef<EditorWorkspaceHandle, EditorWorkspaceProps>(
   const [isPanning, setIsPanning] = useState(false)
   const [mockActionMessage, setMockActionMessage] = useState('')
   const [activeTool, setActiveTool] = useState<ActiveTool>('select')
+  const [paintColors, setPaintColors] = useState({ foreground: '#000000', background: '#ffffff' })
   const [preview, setPreview] = useState<NormalizedRectangle | null>(null)
   const [movePreview, setMovePreview] = useState<{ objectId: string; x: number; y: number } | null>(null)
   const [hoveredObjectId, setHoveredObjectId] = useState<string | null>(null)
@@ -217,6 +220,8 @@ const EditorWorkspace = forwardRef<EditorWorkspaceHandle, EditorWorkspaceProps>(
   function updateRectangleProperties(objectId: string, properties: RectangleObjectProperties): string | null {
     try {
       publishDocumentChange(updateRectangleObjectProperties(documentRef.current, objectId, properties))
+      if (properties.stroke !== undefined) setPaintColors((current) => ({ ...current, foreground: properties.stroke as string }))
+      if (properties.fill !== undefined) setPaintColors((current) => ({ ...current, background: properties.fill as string }))
       return null
     } catch (error) {
       return error instanceof Error ? error.message : 'The Rectangle property is invalid.'
@@ -226,9 +231,35 @@ const EditorWorkspace = forwardRef<EditorWorkspaceHandle, EditorWorkspaceProps>(
   function updateTextProperties(objectId: string, properties: TextObjectProperties): string | null {
     try {
       publishDocumentChange(updateTextObjectProperties(documentRef.current, objectId, properties))
+      if (properties.color !== undefined) setPaintColors((current) => ({ ...current, foreground: properties.color as string }))
       return null
     } catch (error) {
       return error instanceof Error ? error.message : 'The Text property is invalid.'
+    }
+  }
+
+  function selectPaletteColor(color: string, channel: PaintColorChannel) {
+    setPaintColors((current) => ({ ...current, [channel]: color }))
+
+    const draft = textDraftRef.current
+    if (channel === 'foreground' && draft) {
+      setActiveTextDraft({ ...draft, color })
+      if (draft.mode === 'create') return
+    }
+
+    if (!selectedObject) return
+    if (selectedObject.type === 'rectangle') {
+      if (channel === 'foreground') updateRectangleProperties(selectedObject.id, { stroke: color })
+      else updateRectangleProperties(selectedObject.id, { fill: color })
+      return
+    }
+
+    if (channel === 'foreground') {
+      let nextDocument = updateTextObjectProperties(documentRef.current, selectedObject.id, { color })
+      if (selectedObject.runs?.length) {
+        nextDocument = setTextRuns(nextDocument, selectedObject.id, selectedObject.runs.map((run) => ({ ...run, color })))
+      }
+      publishDocumentChange(nextDocument)
     }
   }
 
@@ -239,7 +270,7 @@ const EditorWorkspace = forwardRef<EditorWorkspaceHandle, EditorWorkspaceProps>(
 
     if (draft.mode === 'create') {
       if (!draft.text.trim()) return true
-      const nextDocument = addTextObject(documentRef.current, { x: draft.x, y: draft.y, text: draft.text })
+      const nextDocument = addTextObject(documentRef.current, { x: draft.x, y: draft.y, text: draft.text, color: draft.color })
       const created = nextDocument.objects[nextDocument.objects.length - 1]
       setSelectedObjectId(created.id)
       publishDocumentChange(nextDocument)
@@ -498,7 +529,11 @@ const EditorWorkspace = forwardRef<EditorWorkspaceHandle, EditorWorkspaceProps>(
       if (!end) return
       const rectangle: RectangleGeometry = normalizeRectangle(gesture.startArtboard, end)
       if (rectangle.width <= 0 || rectangle.height <= 0 || !Object.values(rectangle).every(Number.isFinite)) return
-      onDocumentChange(document, addRectangle(document, rectangle))
+      const appearance: RectangleAppearance = {
+        fill: paintColors.background,
+        stroke: paintColors.foreground,
+      }
+      onDocumentChange(document, addRectangle(document, rectangle, appearance))
     }
 
     const handlePointerMove = (event: PointerEvent) => {
@@ -571,7 +606,7 @@ const EditorWorkspace = forwardRef<EditorWorkspaceHandle, EditorWorkspaceProps>(
       globalThis.window.removeEventListener('mousemove', handleMouseMove, true)
       globalThis.window.removeEventListener('mouseup', handleMouseUp, true)
     }
-  }, [activeTool, document, onDocumentChange, clearPanGesture])
+  }, [activeTool, document, onDocumentChange, clearPanGesture, paintColors.background, paintColors.foreground])
 
   useEffect(() => {
     const cancelGesture = (event: KeyboardEvent) => {
@@ -695,6 +730,7 @@ const EditorWorkspace = forwardRef<EditorWorkspaceHandle, EditorWorkspaceProps>(
       text: object.text,
       fontFamily: object.fontFamily,
       fontSize: object.fontSize,
+      color: object.color,
       x: object.x,
       y: object.y,
     })
@@ -712,7 +748,7 @@ const EditorWorkspace = forwardRef<EditorWorkspaceHandle, EditorWorkspaceProps>(
     setSelectedObjectId(null)
     setHoveredObjectId(null)
     setIsMovingObject(false)
-    setActiveTextDraft({ mode: 'create', ...position, text: '' })
+    setActiveTextDraft({ mode: 'create', ...position, text: '', color: paintColors.foreground })
   }
 
   function handleWorkspacePointerDown(event: ReactPointerEvent<HTMLDivElement>) {
@@ -923,6 +959,7 @@ const EditorWorkspace = forwardRef<EditorWorkspaceHandle, EditorWorkspaceProps>(
                     height: Math.max(28, Math.max(1, textDraft.text.split('\n').length) * (textDraft.fontSize ?? DEFAULT_TEXT_FONT_SIZE) * 1.2 * scale + 4),
                     fontSize: (textDraft.fontSize ?? DEFAULT_TEXT_FONT_SIZE) * scale,
                     fontFamily: textDraft.fontFamily ?? 'Courier New, monospace',
+                    color: textDraft.color || DEFAULT_TEXT_COLOR,
                   }}
                   onChange={(event) => {
                     const draft = textDraftRef.current
@@ -966,6 +1003,11 @@ const EditorWorkspace = forwardRef<EditorWorkspaceHandle, EditorWorkspaceProps>(
           onTextChange={updateTextProperties}
         />
       </div>
+      <ColorPalette
+        foregroundColor={paintColors.foreground}
+        backgroundColor={paintColors.background}
+        onSelectColor={selectPaletteColor}
+      />
       <footer className="editor-statusbar">
         <span>{session.projectRoot ? 'Project opened from folder' : session.isDirty ? 'Project folder not set' : 'Opened in browser'}</span>
         <span className="editor-status-message" role="status" aria-live="polite" aria-atomic="true">{statusMessage || mockActionMessage || (isSaving ? 'Saving…' : '')}</span>

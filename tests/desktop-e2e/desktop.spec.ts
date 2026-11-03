@@ -266,6 +266,74 @@ test('starts the real Electron app, creates a project, draws a Rectangle, and ex
   expect(desktop.processExitReason()).not.toBeNull()
 })
 
+test('saves and screenshots an open project with the classic color palette', async ({ desktop }, testInfo) => {
+  const page = desktop.page
+  const svg = await createArtboard(page, 800, 520)
+  const paletteColor = (color: string) => page.locator(`[data-palette-color="${color}"]`)
+  await page.getByRole('button', { name: 'Rectangle' }).click()
+
+  async function drawColoredRectangle(
+    from: { x: number; y: number },
+    to: { x: number; y: number },
+    stroke: string,
+    fill: string,
+  ) {
+    await paletteColor(stroke).click()
+    await paletteColor(fill).click({ button: 'right' })
+    const bounds = await svg.boundingBox()
+    if (!bounds) throw new Error('The Artboard is not visible for the palette screenshot.')
+    await page.mouse.move(bounds.x + bounds.width * from.x, bounds.y + bounds.height * from.y)
+    await page.mouse.down()
+    await page.mouse.move(bounds.x + bounds.width * to.x, bounds.y + bounds.height * to.y, { steps: 5 })
+    await page.mouse.up()
+  }
+
+  await drawColoredRectangle({ x: 0.08, y: 0.15 }, { x: 0.4, y: 0.72 }, '#0000ff', '#00ffff')
+  await drawColoredRectangle({ x: 0.54, y: 0.14 }, { x: 0.91, y: 0.43 }, '#800000', '#ffff00')
+  await drawColoredRectangle({ x: 0.54, y: 0.56 }, { x: 0.91, y: 0.86 }, '#008000', '#80ff00')
+
+  const rectangles = svg.locator(':scope > rect')
+  await expect(rectangles).toHaveCount(4)
+  await expect(rectangles.nth(1)).toHaveAttribute('stroke', '#0000ff')
+  await expect(rectangles.nth(1)).toHaveAttribute('fill', '#00ffff')
+  await expect(rectangles.nth(2)).toHaveAttribute('stroke', '#800000')
+  await expect(rectangles.nth(2)).toHaveAttribute('fill', '#ffff00')
+  await expect(rectangles.nth(3)).toHaveAttribute('stroke', '#008000')
+  await expect(rectangles.nth(3)).toHaveAttribute('fill', '#80ff00')
+
+  await page.getByRole('button', { name: 'Text' }).click()
+  await paletteColor('#800080').click()
+  const boardBounds = await svg.boundingBox()
+  if (!boardBounds) throw new Error('The Artboard is not visible for the palette screenshot text.')
+  await page.mouse.click(boardBounds.x + boardBounds.width * 0.08, boardBounds.y + boardBounds.height * 0.9)
+  const textDraft = page.getByRole('textbox', { name: /Type text/ })
+  await expect(textDraft).toBeFocused()
+  await page.keyboard.type('PAINTSMYS COLOR TEST')
+  await page.keyboard.press('Control+Enter')
+  const text = svg.locator('text')
+  await expect(text).toHaveAttribute('fill', '#800080')
+
+  await page.getByRole('button', { name: 'Select / Move' }).click()
+  const firstRectangleBounds = await rectangles.nth(1).boundingBox()
+  if (!firstRectangleBounds) throw new Error('The first palette Rectangle has no visible bounds.')
+  await page.mouse.click(firstRectangleBounds.x + firstRectangleBounds.width / 2, firstRectangleBounds.y + firstRectangleBounds.height / 2)
+  await expect(page.getByText('Rectangle Properties', { exact: true })).toBeVisible()
+
+  await page.getByRole('button', { name: 'File' }).click()
+  await page.getByRole('menuitem', { name: 'Save', exact: true }).click()
+  await expect(page.getByRole('status')).toContainText('Project saved.')
+
+  const projectPath = join(desktop.dialogDir, 'Saved Project')
+  const manifest = JSON.parse(await readFile(join(projectPath, 'project.json'), 'utf8')) as {
+    scene: { artboard: { width: number; height: number }; objects: Array<{ type: string; fill?: string; stroke?: string; color?: string }> }
+  }
+  expect(manifest.scene.artboard).toEqual({ width: 800, height: 520, backgroundColor: '#ffffff' })
+  expect(manifest.scene.objects).toHaveLength(4)
+  const screenshotPath = testInfo.outputPath('paintsmys-color-palette.png')
+  await page.screenshot({ path: screenshotPath, fullPage: true })
+  await testInfo.attach('paintsmys-color-palette', { path: screenshotPath, contentType: 'image/png' })
+})
+
 test('saves project.json through Desktop IPC and opens it with a clean, valid document', async ({ desktop }) => {
   const svg = await createArtboard(desktop.page, 640, 480)
   await drawRectangle(desktop.page, svg)

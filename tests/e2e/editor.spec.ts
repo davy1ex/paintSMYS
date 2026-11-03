@@ -320,6 +320,125 @@ test('draw, pan, select and move at 200% without changing scene geometry during 
   expect(fitBoard.height).toBeLessThanOrEqual(fitWorkspace.height)
 })
 
+test('Paint palette colors new and selected objects, supports Undo/Redo, and exports matching PNG pixels', async ({ page }) => {
+  const svg = await createArtboard(page, 320, 240)
+  const paletteColor = (color: string) => page.locator(`[data-palette-color="${color}"]`)
+  await expect(page.getByRole('region', { name: 'Color palette' })).toBeVisible()
+
+  await paletteColor('#ff0000').click()
+  await paletteColor('#00ff00').click({ button: 'right' })
+  await page.getByRole('button', { name: 'Rectangle' }).click()
+  await dragOnArtboard(page, svg, { x: 0.2, y: 0.2 }, { x: 0.55, y: 0.55 })
+  const rectangle = svg.locator(':scope > rect').nth(1)
+  await expect(rectangle).toHaveAttribute('stroke', '#ff0000')
+  await expect(rectangle).toHaveAttribute('fill', '#00ff00')
+
+  await page.getByRole('button', { name: 'Select / Move' }).click()
+  const rectangleBox = await rectangle.boundingBox()
+  if (!rectangleBox) throw new Error('The colored Rectangle is not visible.')
+  await page.mouse.click(rectangleBox.x + rectangleBox.width / 2, rectangleBox.y + rectangleBox.height / 2)
+  await expect(page.getByText('Rectangle Properties', { exact: true })).toBeVisible()
+
+  await paletteColor('#0000ff').click()
+  await expect(rectangle).toHaveAttribute('stroke', '#0000ff')
+  await paletteColor('#ffff00').click({ button: 'right' })
+  await expect(rectangle).toHaveAttribute('fill', '#ffff00')
+  await page.keyboard.press('Control+z')
+  await expect(rectangle).toHaveAttribute('fill', '#00ff00')
+  await page.keyboard.press('Control+y')
+  await expect(rectangle).toHaveAttribute('fill', '#ffff00')
+  await page.keyboard.press('Control+z')
+  await expect(rectangle).toHaveAttribute('fill', '#00ff00')
+  await page.keyboard.press('Control+z')
+  await expect(rectangle).toHaveAttribute('stroke', '#ff0000')
+  await page.keyboard.press('Control+y')
+  await expect(rectangle).toHaveAttribute('stroke', '#0000ff')
+  await page.keyboard.press('Control+y')
+  await expect(rectangle).toHaveAttribute('fill', '#ffff00')
+
+  await page.getByRole('button', { name: 'Choose custom color' }).click()
+  const colorDialog = page.getByRole('dialog', { name: 'Custom Color' })
+  await expect(colorDialog).toBeVisible()
+  await colorDialog.getByRole('radio', { name: 'Rectangle fill' }).check()
+  await colorDialog.getByRole('textbox', { name: 'Custom color HEX' }).fill('#123abc')
+  await colorDialog.getByRole('button', { name: 'OK' }).click()
+  await expect(rectangle).toHaveAttribute('fill', '#123abc')
+  await page.keyboard.press('Control+z')
+  await expect(rectangle).toHaveAttribute('fill', '#ffff00')
+  await page.keyboard.press('Control+y')
+  await expect(rectangle).toHaveAttribute('fill', '#123abc')
+
+  const fillColor = page.getByRole('textbox', { name: 'Fill Color' })
+  await fillColor.fill('#ff00ff')
+  await fillColor.press('Enter')
+  await expect(rectangle).toHaveAttribute('fill', '#ff00ff')
+  const strokeColor = page.getByRole('textbox', { name: 'Stroke Color' })
+  await strokeColor.fill('#00ffff')
+  await strokeColor.press('Enter')
+  await expect(rectangle).toHaveAttribute('stroke', '#00ffff')
+  const strokeWidth = page.getByRole('textbox', { name: 'Stroke Width' })
+  await strokeWidth.fill('4')
+  await strokeWidth.press('Enter')
+  await expect(rectangle).toHaveAttribute('stroke-width', '4')
+
+  const board = await svg.boundingBox()
+  if (!board) throw new Error('The Artboard is not visible for Text creation.')
+  await page.getByRole('button', { name: 'Select / Move' }).click()
+  await page.mouse.click(board.x + board.width * 0.92, board.y + board.height * 0.9)
+  await page.getByRole('button', { name: 'Text' }).click()
+  await paletteColor('#800080').click()
+  await page.mouse.click(board.x + board.width * 0.68, board.y + board.height * 0.16)
+  const textDraft = page.getByRole('textbox', { name: /Type text/ })
+  await expect(textDraft).toBeFocused()
+  await page.keyboard.type('Palette text')
+  await page.keyboard.press('Control+Enter')
+  await expect(svg.locator('text')).toHaveAttribute('fill', '#800080')
+
+  const exportPromise = page.waitForEvent('download')
+  await page.getByRole('button', { name: 'File' }).click()
+  await page.getByRole('menuitem', { name: /Export PNG/ }).click()
+  const download = await exportPromise
+  const pngPath = await download.path()
+  if (!pngPath) throw new Error('The palette export did not produce a PNG file.')
+  const pngBytes = await readFile(pngPath)
+  expect(pngBytes.readUInt32BE(16)).toBe(320)
+  expect(pngBytes.readUInt32BE(20)).toBe(240)
+  const centerPixel = await page.evaluate(async ({ base64, x, y }) => {
+    const binary = atob(base64)
+    const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0))
+    const image = await createImageBitmap(new Blob([bytes], { type: 'image/png' }))
+    const canvas = document.createElement('canvas')
+    canvas.width = image.width
+    canvas.height = image.height
+    const context = canvas.getContext('2d')
+    if (!context) throw new Error('Could not inspect palette export pixels.')
+    context.drawImage(image, 0, 0)
+    const pixel = [...context.getImageData(x, y, 1, 1).data]
+    image.close()
+    return pixel
+  }, {
+    base64: pngBytes.toString('base64'),
+    x: 120,
+    y: 90,
+  })
+  expect(centerPixel).toEqual([255, 0, 255, 255])
+  const strokePixel = await page.evaluate(async ({ base64, x, y }) => {
+    const binary = atob(base64)
+    const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0))
+    const image = await createImageBitmap(new Blob([bytes], { type: 'image/png' }))
+    const canvas = document.createElement('canvas')
+    canvas.width = image.width
+    canvas.height = image.height
+    const context = canvas.getContext('2d')
+    if (!context) throw new Error('Could not inspect exported stroke pixels.')
+    context.drawImage(image, 0, 0)
+    const pixel = [...context.getImageData(x, y, 1, 1).data]
+    image.close()
+    return pixel
+  }, { base64: pngBytes.toString('base64'), x: 100, y: 49 })
+  expect(strokePixel).toEqual([0, 255, 255, 255])
+})
+
 test('pointer cancellation clears Space+Drag and later tool use still works', async ({ page }) => {
   const svg = await createArtboard(page, 500, 400)
   const before = await svg.boundingBox()

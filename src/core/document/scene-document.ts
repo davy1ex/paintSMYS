@@ -56,6 +56,7 @@ export type SceneDocument = {
 }
 
 export type RectangleGeometry = Pick<RectangleObject, 'x' | 'y' | 'width' | 'height'>
+export type RectangleAppearance = Partial<Pick<RectangleObject, 'fill' | 'stroke' | 'strokeWidth'>>
 export type ObjectPosition = Pick<RectangleObject, 'x' | 'y'>
 export type RectangleObjectProperties = Partial<Pick<RectangleObject, 'x' | 'y' | 'width' | 'height' | 'fill' | 'stroke' | 'strokeWidth'>>
 export type TextObjectProperties = Partial<Pick<TextObject, 'x' | 'y' | 'fontFamily' | 'fontSize' | 'color'>>
@@ -154,7 +155,11 @@ export function createSceneDocument(width: number, height: number): SceneDocumen
   }
 }
 
-export function addRectangle(document: SceneDocument, geometry: RectangleGeometry): SceneDocument {
+export function addRectangle(
+  document: SceneDocument,
+  geometry: RectangleGeometry,
+  appearance: RectangleAppearance = {},
+): SceneDocument {
   const existingIds = new Set(document.objects.map((object) => object.id))
   let id = createId()
   while (existingIds.has(id)) id = createId()
@@ -167,9 +172,9 @@ export function addRectangle(document: SceneDocument, geometry: RectangleGeometr
         id,
         type: 'rectangle',
         ...geometry,
-        fill: '#ffffff',
-        stroke: '#000000',
-        strokeWidth: 1,
+        fill: appearance.fill ?? '#ffffff',
+        stroke: appearance.stroke ?? '#000000',
+        strokeWidth: appearance.strokeWidth ?? 1,
       },
     ],
   })
